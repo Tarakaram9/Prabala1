@@ -5,7 +5,9 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execFile, spawn } from 'child_process';
+import Anthropic from '@anthropic-ai/sdk';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const RENDERER_URL = 'http://localhost:5173';
@@ -52,7 +54,7 @@ app.whenReady().then(() => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ws://localhost:* http://localhost:*; img-src 'self' data: blob:; media-src 'self'"
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ws://localhost:* http://localhost:* https://api.anthropic.com; img-src 'self' data: blob:; media-src 'self'"
         ],
       },
     });
@@ -242,4 +244,75 @@ function registerIpcHandlers(): void {
   // ── App info ─────────────────────────────────────────────────────────────────
   ipcMain.handle('app:getVersion', () => app.getVersion());
   ipcMain.handle('app:getPlatform', () => process.platform);
+
+  // ── Agentic AI ───────────────────────────────────────────────────────────────
+  const AI_CONFIG_PATH = path.join(os.homedir(), '.prabala', 'ai.json');
+
+  function readAiConfig(): Record<string, string> {
+    try {
+      if (fs.existsSync(AI_CONFIG_PATH)) {
+        return JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf-8'));
+      }
+    } catch { /* ignore */ }
+    return {};
+  }
+
+  function writeAiConfig(data: Record<string, string>): void {
+    fs.mkdirSync(path.dirname(AI_CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
+  }
+
+  ipcMain.handle('ai:getKey', () => {
+    return readAiConfig().apiKey ?? '';
+  });
+
+  ipcMain.handle('ai:setKey', (_e, key: string) => {
+    const cfg = readAiConfig();
+    writeAiConfig({ ...cfg, apiKey: key });
+    return true;
+  });
+
+  // Active stream reference — allows abort
+  let activeStream: { controller: AbortController } | null = null;
+
+  ipcMain.handle('ai:chat',
+    async (_e, messages: { role: 'user' | 'assistant'; content: string }[], systemPrompt: string) => {
+      const apiKey = readAiConfig().apiKey;
+      if (!apiKey) throw new Error('No API key configured. Go to AI Settings to add your Anthropic API key.');
+
+      const client = new Anthropic({ apiKey });
+      const controller = new AbortController();
+      activeStream = { controller };
+      let fullText = '';
+
+      try {
+        const stream = await client.messages.stream({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages,
+        }, { signal: controller.signal });
+
+        for await (const chunk of stream) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            fullText += chunk.delta.text;
+            mainWindow?.webContents.send('ai:chunk', chunk.delta.text);
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') throw err;
+      } finally {
+        activeStream = null;
+        mainWindow?.webContents.send('ai:done');
+      }
+
+      return { text: fullText };
+    }
+  );
+
+  ipcMain.handle('ai:abort', () => {
+    activeStream?.controller.abort();
+    activeStream = null;
+    return true;
+  });
 }

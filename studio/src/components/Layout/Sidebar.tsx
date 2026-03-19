@@ -1,7 +1,7 @@
 import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
-  PlayCircle, BarChart3, FolderOpen, Sparkles
+  PlayCircle, BarChart3, FolderOpen, Sparkles, Brain
 } from 'lucide-react'
 
 import { LucideIcon } from 'lucide-react'
@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { id: 'data',     label: 'Test Data',        icon: Table2 },
   { id: 'monitor',  label: 'Run Tests',        icon: PlayCircle },
   { id: 'report',   label: 'Reports',          icon: BarChart3 },
+  { id: 'ai',       label: 'AI Co-Pilot',      icon: Brain, badge: 'NEW' },
 ]
 
 export default function Sidebar() {
@@ -87,6 +88,9 @@ export default function Sidebar() {
               <span className="flex-1">{item.label}</span>
               {isRunning && (
                 <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+              )}
+              {item.badge && !isRunning && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-brand-600/40 text-brand-300 leading-none">{item.badge}</span>
               )}
             </button>
           )

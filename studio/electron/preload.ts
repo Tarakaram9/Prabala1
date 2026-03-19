@@ -74,7 +74,26 @@ contextBridge.exposeInMainWorld('prabala', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
   },
-});
+  // ── Agentic AI ───────────────────────────────────────────────────────────────
+  ai: {
+    getKey: () => ipcRenderer.invoke('ai:getKey'),
+    setKey: (key: string) => ipcRenderer.invoke('ai:setKey', key),
+    chat: (
+      messages: { role: 'user' | 'assistant'; content: string }[],
+      systemPrompt: string
+    ) => ipcRenderer.invoke('ai:chat', messages, systemPrompt),
+    abort: () => ipcRenderer.invoke('ai:abort'),
+    onChunk: (cb: (token: string) => void) => {
+      ipcRenderer.on('ai:chunk', (_e, token) => cb(token));
+    },
+    onDone: (cb: () => void) => {
+      ipcRenderer.once('ai:done', () => cb());
+    },
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('ai:chunk');
+      ipcRenderer.removeAllListeners('ai:done');
+    },
+  },});
 
 // Type declaration for TypeScript in renderer
 declare global {
@@ -92,6 +111,18 @@ declare global {
       };
       shell: { openPath(p: string): Promise<void> };
       app: { getVersion(): Promise<string>; getPlatform(): Promise<string> };
+      ai: {
+        getKey(): Promise<string>;
+        setKey(key: string): Promise<void>;
+        chat(
+          messages: { role: 'user' | 'assistant'; content: string }[],
+          systemPrompt: string
+        ): Promise<{ text: string }>;
+        abort(): Promise<void>;
+        onChunk(cb: (token: string) => void): void;
+        onDone(cb: () => void): void;
+        removeListeners(): void;
+      };
       recorder: {
         start(url: string, projectDir: string): Promise<void>;
         stop(): Promise<void>;

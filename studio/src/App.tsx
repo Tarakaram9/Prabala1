@@ -6,6 +6,7 @@ import ObjectRepositoryPage from './pages/ObjectRepositoryPage'
 import TestDataPage from './pages/TestDataPage'
 import ExecutionMonitorPage from './pages/ExecutionMonitorPage'
 import ReportViewerPage from './pages/ReportViewerPage'
+import AIPage from './pages/AIPage'
 import { useAppStore } from './store/appStore'
 import { loadProjectData } from './utils/projectLoader'
 
@@ -24,6 +25,7 @@ export default function App() {
     data:     <TestDataPage />,
     monitor:  <ExecutionMonitorPage />,
     report:   <ReportViewerPage />,
+    ai:       <AIPage />,
   }[activePage]
 
   return <Layout>{page}</Layout>
