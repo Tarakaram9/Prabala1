@@ -4,7 +4,7 @@
 
 import { create } from 'zustand'
 
-export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai'
+export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components'
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -46,6 +46,28 @@ export interface ObjectEntry {
   locator: string
   description?: string
   page?: string
+}
+
+// Page definition metadata (URL, description per page)
+export interface PageDef {
+  name: string
+  url?: string
+  description?: string
+}
+
+// Reusable component (named step sequence with parameters)
+export interface ComponentStep {
+  keyword: string
+  params: Record<string, string>
+  description?: string
+}
+
+export interface ComponentDef {
+  id: string
+  name: string
+  description?: string
+  params: string[]            // parameter names, e.g. ['username','password']
+  steps: ComponentStep[]
 }
 
 export interface RunLog {
@@ -93,6 +115,14 @@ interface AppState {
   // Object repository
   objects: ObjectEntry[]
   setObjects: (objs: ObjectEntry[]) => void
+
+  // Page definitions (POM metadata)
+  pageDefs: PageDef[]
+  setPageDefs: (defs: PageDef[]) => void
+
+  // Reusable components
+  componentDefs: ComponentDef[]
+  setComponentDefs: (defs: ComponentDef[]) => void
 
   // Keywords
   keywords: string[]
@@ -181,6 +211,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   objects: [],
   setObjects: (objects) => set({ objects }),
+
+  pageDefs: [],
+  setPageDefs: (pageDefs) => set({ pageDefs }),
+
+  componentDefs: [],
+  setComponentDefs: (componentDefs) => set({ componentDefs }),
 
   keywords: [],
   setKeywords: (keywords) => set({ keywords }),

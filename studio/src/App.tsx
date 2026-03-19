@@ -3,6 +3,7 @@ import Layout from './components/Layout/Layout'
 import TestBuilderPage from './pages/TestBuilderPage'
 import KeywordLibraryPage from './pages/KeywordLibraryPage'
 import ObjectRepositoryPage from './pages/ObjectRepositoryPage'
+import ComponentsPage from './pages/ComponentsPage'
 import TestDataPage from './pages/TestDataPage'
 import ExecutionMonitorPage from './pages/ExecutionMonitorPage'
 import ReportViewerPage from './pages/ReportViewerPage'
@@ -30,13 +31,14 @@ export default function App() {
 
   // 3. Fully authenticated with workspace → show main Studio
   const page = {
-    builder:  <TestBuilderPage />,
-    keywords: <KeywordLibraryPage />,
-    objects:  <ObjectRepositoryPage />,
-    data:     <TestDataPage />,
-    monitor:  <ExecutionMonitorPage />,
-    report:   <ReportViewerPage />,
-    ai:       <AIPage />,
+    builder:    <TestBuilderPage />,
+    keywords:   <KeywordLibraryPage />,
+    objects:    <ObjectRepositoryPage />,
+    components: <ComponentsPage />,
+    data:       <TestDataPage />,
+    monitor:    <ExecutionMonitorPage />,
+    report:     <ReportViewerPage />,
+    ai:         <AIPage />,
   }[activePage]
 
   return <Layout>{page}</Layout>

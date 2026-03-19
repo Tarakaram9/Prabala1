@@ -1,7 +1,7 @@
 import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
-  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User
+  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle
 } from 'lucide-react'
 import { LucideIcon } from 'lucide-react'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -14,13 +14,14 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { id: 'builder',  label: 'Test Builder',    icon: FlaskConical },
-  { id: 'keywords', label: 'Keywords',         icon: Library },
-  { id: 'objects',  label: 'Object Repository',icon: Database },
-  { id: 'data',     label: 'Test Data',        icon: Table2 },
-  { id: 'monitor',  label: 'Run Tests',        icon: PlayCircle },
-  { id: 'report',   label: 'Reports',          icon: BarChart3 },
-  { id: 'ai',       label: 'AI Co-Pilot',      icon: Brain, badge: 'NEW' },
+  { id: 'builder',    label: 'Test Builder',    icon: FlaskConical },
+  { id: 'keywords',   label: 'Keywords',         icon: Library },
+  { id: 'objects',    label: 'Object Repository',icon: Database },
+  { id: 'components', label: 'Components',       icon: Puzzle,   badge: 'POM' },
+  { id: 'data',       label: 'Test Data',        icon: Table2 },
+  { id: 'monitor',    label: 'Run Tests',        icon: PlayCircle },
+  { id: 'report',     label: 'Reports',          icon: BarChart3 },
+  { id: 'ai',         label: 'AI Co-Pilot',      icon: Brain,    badge: 'NEW' },
 ]
 
 export default function Sidebar() {

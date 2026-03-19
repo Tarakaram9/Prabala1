@@ -39,6 +39,8 @@ export default function WorkspacePage() {
     await ipc.fs.mkdir(`${path}/tests`)
     await ipc.fs.mkdir(`${path}/test-data`)
     await ipc.fs.mkdir(`${path}/objects`)
+    await ipc.fs.mkdir(`${path}/object-repository`)
+    await ipc.fs.mkdir(`${path}/components`)
     setWorkspace({ name, path })
   }
 

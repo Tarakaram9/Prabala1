@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import yaml from 'js-yaml'
-import { useAppStore, TestCase, TestStep, ObjectEntry } from '../store/appStore'
+import { useAppStore, TestCase, TestStep, ObjectEntry, PageDef, ComponentDef, ComponentStep } from '../store/appStore'
 
 const ipc = (window as any).prabala
 
@@ -29,6 +29,14 @@ export async function loadProjectData(projectDir: string): Promise<void> {
     // Load object repository
     const objects = await loadObjectRepository(projectDir)
     useAppStore.getState().setObjects(objects)
+
+    // Load page definitions
+    const pageDefs = await loadPageDefs(projectDir)
+    useAppStore.getState().setPageDefs(pageDefs)
+
+    // Load reusable components
+    const componentDefs = await loadComponentDefs(projectDir)
+    useAppStore.getState().setComponentDefs(componentDefs)
 
     // Fetch keyword list from CLI
     const keywords = await fetchKeywords(projectDir)
@@ -102,6 +110,51 @@ async function loadObjectRepository(projectDir: string): Promise<ObjectEntry[]> 
     }
   }
   return objects
+}
+
+async function loadPageDefs(projectDir: string): Promise<PageDef[]> {
+  const pagesFile = `${projectDir}/object-repository/pages.yaml`
+  const exists: boolean = await ipc.fs.exists(pagesFile)
+  if (!exists) return []
+  try {
+    const content: string = await ipc.fs.readFile(pagesFile)
+    const parsed = yaml.load(content) as any
+    return (parsed?.pages ?? []).map((p: any) => ({
+      name: p.name ?? '',
+      url: p.url ?? '',
+      description: p.description ?? '',
+    })).filter((p: PageDef) => p.name)
+  } catch { return [] }
+}
+
+async function loadComponentDefs(projectDir: string): Promise<ComponentDef[]> {
+  const compDir = `${projectDir}/components`
+  const exists: boolean = await ipc.fs.exists(compDir)
+  if (!exists) return []
+  const entries: { name: string; isDir: boolean; path: string }[] = await ipc.fs.readDir(compDir)
+  const defs: ComponentDef[] = []
+  for (const entry of entries) {
+    if (!entry.isDir && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+      try {
+        const content: string = await ipc.fs.readFile(entry.path)
+        const parsed = yaml.load(content) as any
+        if (parsed?.name) {
+          defs.push({
+            id: entry.path,
+            name: parsed.name,
+            description: parsed.description ?? '',
+            params: parsed.params ?? [],
+            steps: (parsed.steps ?? []).map((s: any): ComponentStep => ({
+              keyword: s.keyword ?? '',
+              params: s.params ?? {},
+              description: s.description ?? '',
+            })),
+          })
+        }
+      } catch {}
+    }
+  }
+  return defs
 }
 
 async function fetchKeywords(projectDir: string): Promise<string[]> {

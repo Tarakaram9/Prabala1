@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAppStore, TestCase, TestStep } from '../store/appStore'
+import { useAppStore, TestCase, TestStep, ComponentDef } from '../store/appStore'
 import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
-  X, ChevronLeft, Zap, ClipboardList, Wand2, Database
+  X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -56,6 +56,7 @@ function splitContent(text: string) {
 }
 
 const KEYWORD_CATEGORIES: Record<string, string[]> = {
+  'Components': ['UseComponent'],
   'Browser': ['Web.Launch', 'Web.Close', 'NavigateTo', 'GoBack', 'Reload'],
   'Interaction': ['Click', 'DoubleClick', 'RightClick', 'EnterText', 'PressKey', 'SelectOption', 'Hover', 'ScrollTo', 'Check', 'Uncheck', 'UploadFile'],
   'Wait': ['WaitForVisible', 'WaitForHidden', 'WaitForNavigation', 'Wait'],
@@ -115,6 +116,8 @@ const KEYWORD_PARAMS: Record<string, string[]> = {
   'Desktop.GetText': ['locator', 'variable'], 'Desktop.GetAttribute': ['locator', 'attribute', 'variable'],
   'Desktop.Scroll': ['locator', 'direction', 'amount'],
   'Desktop.SetWindowSize': ['width', 'height'], 'Desktop.TakeScreenshot': ['name'],
+  // Reusable Components
+  'UseComponent': ['component'],
   // SAP GUI
   'SAP.Connect':            ['system', 'sessionIndex'],
   'SAP.Disconnect':         [],
@@ -154,7 +157,7 @@ function newTestCase(): TestCase {
 }
 
 export default function TestBuilderPage() {
-  const { testCases, activeTestCase, setActiveTestCase, setTestCases, updateTestCase, appendStepToActive, markSaved, projectDir, deleteTestCase, setActivePage } = useAppStore()
+  const { testCases, activeTestCase, setActiveTestCase, setTestCases, updateTestCase, appendStepToActive, markSaved, projectDir, deleteTestCase, setActivePage, objects, componentDefs } = useAppStore()
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState<number | null>(null)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -192,6 +195,10 @@ export default function TestBuilderPage() {
   const [testDataVars, setTestDataVars] = useState<string[]>([])
   const [paramPicker, setParamPicker] = useState<{ stepId: string; key: string } | null>(null)
   const paramPickerRef = useRef<HTMLDivElement>(null)
+
+  // ─ Object picker (@object reference) ─────────────────────────────────────
+  const [objectPicker, setObjectPicker] = useState<{ stepId: string; key: string } | null>(null)
+  const objectPickerRef = useRef<HTMLDivElement>(null)
 
   // Load test data variable names from test-data/ files whenever projectDir changes
   useEffect(() => {
@@ -235,6 +242,17 @@ export default function TestBuilderPage() {
     if (paramPicker) document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [paramPicker])
+
+  // Close object picker on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (objectPickerRef.current && !objectPickerRef.current.contains(e.target as Node)) {
+        setObjectPicker(null)
+      }
+    }
+    if (objectPicker) document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [objectPicker])
 
   const tc = activeTestCase
 
@@ -969,16 +987,166 @@ steps:
                           onChange={e => updateStep(step.id, { description: e.target.value })}
                           placeholder="Step description (optional)..."
                         />
-                        {paramKeys.map(key => (
+                        {/* ── UseComponent special rendering ── */}
+                        {step.keyword === 'UseComponent' ? (() => {
+                          const selectedComp: ComponentDef | undefined = componentDefs.find(c => c.name === step.params['component'])
+                          // Dynamic param keys: component name + selected component's params
+                          const compParamKeys = selectedComp ? selectedComp.params : []
+                          return (
+                            <>
+                              {/* Component picker */}
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-slate-500 font-mono w-24 flex-shrink-0">component</label>
+                                <div className="relative flex-1">
+                                  <Puzzle size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-500 pointer-events-none" />
+                                  <select
+                                    className="input text-xs font-mono w-full pl-7 text-brand-300"
+                                    value={step.params['component'] ?? ''}
+                                    onChange={e => {
+                                      // When component changes, reset all its params
+                                      const comp = componentDefs.find(c => c.name === e.target.value)
+                                      const newParams: Record<string, string> = { component: e.target.value }
+                                      if (comp) comp.params.forEach(p => { newParams[p] = step.params[p] ?? '' })
+                                      updateStep(step.id, { params: newParams })
+                                    }}
+                                  >
+                                    <option value="">— select component —</option>
+                                    {componentDefs.map(c => (
+                                      <option key={c.id} value={c.name}>{c.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              {/* Dynamic params from selected component */}
+                              {compParamKeys.map(pKey => (
+                                <div key={pKey} className="flex items-center gap-2">
+                                  <label className="text-xs text-slate-500 font-mono w-24 flex-shrink-0">{pKey}</label>
+                                  <div className="relative flex-1">
+                                    <input
+                                      className="input text-xs font-mono w-full pr-14"
+                                      value={step.params[pKey] ?? ''}
+                                      onChange={e => updateParam(step.id, pKey, e.target.value)}
+                                      placeholder={`{{TEST_DATA.${pKey}}}`}
+                                    />
+                                    {/* Object picker */}
+                                    {objects.length > 0 && (
+                                      <button
+                                        type="button"
+                                        title="Insert @object reference"
+                                        onClick={e => {
+                                          e.stopPropagation()
+                                          setObjectPicker(prev =>
+                                            prev?.stepId === step.id && prev?.key === pKey ? null : { stepId: step.id, key: pKey }
+                                          )
+                                          setParamPicker(null)
+                                        }}
+                                        className="absolute right-7 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-green-400 hover:bg-surface-600 transition-colors"
+                                      >
+                                        <AtSign size={11} />
+                                      </button>
+                                    )}
+                                    {/* Test data picker */}
+                                    {testDataVars.length > 0 && (
+                                      <button
+                                        type="button"
+                                        title="Insert test data variable"
+                                        onClick={e => {
+                                          e.stopPropagation()
+                                          setParamPicker(prev =>
+                                            prev?.stepId === step.id && prev?.key === pKey ? null : { stepId: step.id, key: pKey }
+                                          )
+                                          setObjectPicker(null)
+                                        }}
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-brand-400 hover:bg-surface-600 transition-colors"
+                                      >
+                                        <Database size={11} />
+                                      </button>
+                                    )}
+                                    {/* Object dropdown */}
+                                    {objectPicker?.stepId === step.id && objectPicker?.key === pKey && (
+                                      <div ref={objectPickerRef} className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface-800 border border-green-700/50 rounded-lg shadow-xl overflow-hidden">
+                                        <div className="px-2 py-1.5 border-b border-surface-600 flex items-center gap-1.5">
+                                          <AtSign size={10} className="text-green-400" />
+                                          <span className="text-[10px] text-green-300 font-semibold">Objects</span>
+                                          <span className="text-[10px] text-slate-600 ml-1">grouped by page</span>
+                                        </div>
+                                        <div className="max-h-52 overflow-y-auto py-1">
+                                          {Array.from(new Set(objects.map(o => o.page || 'default'))).sort().map(page => (
+                                            <div key={page}>
+                                              <div className="px-3 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider bg-surface-900/60">{page}</div>
+                                              {objects.filter(o => (o.page || 'default') === page).map(obj => (
+                                                <button key={obj.key} type="button"
+                                                  onClick={() => { updateParam(step.id, pKey, `@${obj.key}`); setObjectPicker(null) }}
+                                                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-green-300 hover:bg-green-900/30 hover:text-green-200 transition-colors flex items-center justify-between gap-2"
+                                                >
+                                                  <span>@{obj.key}</span>
+                                                  {obj.description && <span className="text-[10px] text-slate-600 truncate max-w-24">{obj.description}</span>}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ))}
+                                          {objects.length === 0 && <p className="text-xs text-slate-600 px-3 py-2 italic">No objects defined yet.</p>}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {/* Test data dropdown */}
+                                    {paramPicker?.stepId === step.id && paramPicker?.key === pKey && (
+                                      <div ref={paramPickerRef} className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface-800 border border-brand-700/50 rounded-lg shadow-xl overflow-hidden">
+                                        <div className="px-2 py-1.5 border-b border-surface-600 flex items-center gap-1.5">
+                                          <Database size={10} className="text-brand-400" />
+                                          <span className="text-[10px] text-brand-300 font-semibold">Test Data</span>
+                                        </div>
+                                        <div className="max-h-40 overflow-y-auto py-1">
+                                          {testDataVars.map(varKey => (
+                                            <button key={varKey} type="button"
+                                              onClick={() => { updateParam(step.id, pKey, `{{TEST_DATA.${varKey}}}`); setParamPicker(null) }}
+                                              className="w-full text-left px-3 py-1.5 text-xs font-mono text-brand-300 hover:bg-brand-800/40 hover:text-brand-200 transition-colors"
+                                            >{`{{TEST_DATA.${varKey}}}`}</button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              {selectedComp && (
+                                <p className="text-[10px] text-slate-600 italic ml-1">
+                                  {selectedComp.steps.length} steps · {selectedComp.description || 'No description'}
+                                </p>
+                              )}
+                            </>
+                          )
+                        })() : (
+                        /* ── Generic param rendering ── */
+                        paramKeys.map(key => {
+                          const isLocator = key === 'locator' || key.toLowerCase().includes('locator')
+                          return (
                           <div key={key} className="flex items-center gap-2">
                             <label className="text-xs text-slate-500 font-mono w-24 flex-shrink-0">{key}</label>
                             <div className="relative flex-1">
                               <input
-                                className="input text-xs font-mono w-full pr-7"
+                                className={`input text-xs font-mono w-full ${(isLocator && objects.length > 0) || testDataVars.length > 0 ? (isLocator && objects.length > 0 && testDataVars.length > 0 ? 'pr-14' : 'pr-7') : ''}`}
                                 value={step.params[key] ?? ''}
                                 onChange={e => updateParam(step.id, key, e.target.value)}
-                                placeholder={`{${key.toUpperCase()}} or {{TEST_DATA.x}}`}
+                                placeholder={isLocator ? `@object or css/xpath/text=...` : `{${key.toUpperCase()}} or {{TEST_DATA.x}}`}
                               />
+                              {/* @Object picker button — only for locator params */}
+                              {isLocator && objects.length > 0 && (
+                                <button
+                                  type="button"
+                                  title="Insert @object reference"
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    setObjectPicker(prev =>
+                                      prev?.stepId === step.id && prev?.key === key ? null : { stepId: step.id, key }
+                                    )
+                                    setParamPicker(null)
+                                  }}
+                                  className={`absolute top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-green-400 hover:bg-surface-600 transition-colors ${testDataVars.length > 0 ? 'right-7' : 'right-1.5'}`}
+                                >
+                                  <AtSign size={11} />
+                                </button>
+                              )}
                               {/* Test Data picker button */}
                               {testDataVars.length > 0 && (
                                 <button
@@ -990,13 +1158,46 @@ steps:
                                       prev?.stepId === step.id && prev?.key === key ? null
                                         : { stepId: step.id, key }
                                     )
+                                    setObjectPicker(null)
                                   }}
                                   className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-brand-400 hover:bg-surface-600 transition-colors"
                                 >
                                   <Database size={11} />
                                 </button>
                               )}
-                              {/* Picker dropdown */}
+                              {/* Object picker dropdown */}
+                              {objectPicker?.stepId === step.id && objectPicker?.key === key && (
+                                <div
+                                  ref={objectPickerRef}
+                                  className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface-800 border border-green-700/50 rounded-lg shadow-xl overflow-hidden"
+                                >
+                                  <div className="px-2 py-1.5 border-b border-surface-600 flex items-center gap-1.5">
+                                    <AtSign size={10} className="text-green-400" />
+                                    <span className="text-[10px] text-green-300 font-semibold">Objects</span>
+                                    <span className="text-[10px] text-slate-600 ml-1">grouped by page</span>
+                                  </div>
+                                  <div className="max-h-52 overflow-y-auto py-1">
+                                    {Array.from(new Set(objects.map(o => o.page || 'default'))).sort().map(page => (
+                                      <div key={page}>
+                                        <div className="px-3 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider bg-surface-900/60">{page}</div>
+                                        {objects.filter(o => (o.page || 'default') === page).map(obj => (
+                                          <button key={obj.key} type="button"
+                                            onClick={() => { updateParam(step.id, key, `@${obj.key}`); setObjectPicker(null) }}
+                                            className="w-full text-left px-3 py-1.5 text-xs font-mono text-green-300 hover:bg-green-900/30 hover:text-green-200 transition-colors flex items-center justify-between gap-2"
+                                          >
+                                            <span>@{obj.key}</span>
+                                            {obj.description && <span className="text-[10px] text-slate-600 truncate max-w-24">{obj.description}</span>}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ))}
+                                    {objects.length === 0 && (
+                                      <p className="text-xs text-slate-600 px-3 py-2 italic">No objects defined yet.</p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {/* Test data picker dropdown */}
                               {paramPicker?.stepId === step.id && paramPicker?.key === key && (
                                 <div
                                   ref={paramPickerRef}
@@ -1026,7 +1227,9 @@ steps:
                               )}
                             </div>
                           </div>
-                        ))}
+                          )
+                        })
+                        )}
                         <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer mt-1">
                           <input
                             type="checkbox"
