@@ -1,0 +1,44 @@
+name: Prabala CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: cd packages/driver-web && npx playwright install --with-deps chromium
+
+      - name: Run Prabala tests
+        run: node packages/cli/dist/index.js run "tests/**/*.yaml" --headless
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prabala-artifacts-node-${{ matrix.node-version }}
+          path: artifacts/
+          retention-days: 30

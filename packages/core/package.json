@@ -1,0 +1,22 @@
+{
+  "name": "@prabala/core",
+  "version": "0.1.0",
+  "description": "Prabala Core Engine – parser, keyword resolver, execution orchestrator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rimraf dist && tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "chalk": "^4.1.2",
+    "glob": "^10.3.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.4.0",
+    "rimraf": "^5.0.0"
+  },
+  "license": "Apache-2.0"
+}

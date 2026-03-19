@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Object Repository: TodoMVC Web Page
+# All locators for the Playwright Demo TodoMVC application
+# ─────────────────────────────────────────────────────────────────────────────
+objects:
+  todo-input:
+    strategy: css
+    locator: ".new-todo"
+    description: "Main input field for adding new todos"
+
+  todo-list:
+    strategy: css
+    locator: ".todo-list"
+    description: "The container list of all todos"
+
+  first-todo-label:
+    strategy: css
+    locator: ".todo-list li:first-child label"
+    description: "Label of the first todo item"
+
+  first-todo-checkbox:
+    strategy: css
+    locator: ".todo-list li:first-child .toggle"
+    description: "Checkbox of the first todo item"
+
+  todo-count:
+    strategy: css
+    locator: ".todo-count"
+    description: "Item count label at the bottom"
+
+  clear-completed-btn:
+    strategy: text
+    locator: "Clear completed"
+    description: "Button to clear all completed todos"
+
+  filter-all:
+    strategy: css
+    locator: "a[href='#/']"
+    description: "All filter link"
+
+  filter-active:
+    strategy: css
+    locator: "a[href='#/active']"
+    description: "Active filter link"
+
+  filter-completed:
+    strategy: css
+    locator: "a[href='#/completed']"
+    description: "Completed filter link"

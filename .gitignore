@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+dist-electron/
+**/dist-electron/
+**/.vite/
+*.log
+.env
+.env.local
+.DS_Store
+coverage/
+allure-results/
+allure-report/
+artifacts/
+*.db
+*.tsbuildinfo

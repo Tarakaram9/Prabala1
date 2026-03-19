@@ -1,0 +1,28 @@
+{
+  "name": "prabala",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prabala – Open Source Keyword-Driven Automation Framework for Web & Desktop",
+  "workspaces": [
+    "packages/*",
+    "studio"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint packages/*/src/**/*.ts",
+    "prabala": "node packages/cli/dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "rimraf": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "Apache-2.0"
+}

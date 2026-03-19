@@ -1,0 +1,11 @@
+# Prabala Configuration
+# ─────────────────────────────────────────────────────────────
+baseUrl: "https://demo.playwright.dev/todomvc"
+browser: chromium
+headless: true
+timeout: 30000
+objectRepositoryDir: object-repository
+testDataDir: test-data
+outputDir: artifacts
+env:
+  ENVIRONMENT: "dev"

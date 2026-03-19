@@ -1,0 +1,21 @@
+{
+  "name": "@prabala/driver-api",
+  "version": "0.1.0",
+  "description": "Prabala API Driver – REST, GraphQL, SOAP testing",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rimraf dist && tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@prabala/core": "*",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "rimraf": "^5.0.0"
+  },
+  "license": "Apache-2.0"
+}
