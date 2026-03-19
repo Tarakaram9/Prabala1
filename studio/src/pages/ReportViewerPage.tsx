@@ -2,31 +2,31 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import {
   BarChart3, CheckCircle2, XCircle, Clock, ExternalLink,
-  ChevronDown, ChevronRight, RefreshCw, AlertCircle
+  ChevronDown, ChevronRight, RefreshCw, AlertCircle, Camera
 } from 'lucide-react'
 
 interface StepResult {
-  step: number
   keyword: string
   params?: Record<string, string>
-  status: 'PASS' | 'FAIL' | 'SKIP'
+  status: 'passed' | 'failed' | 'skipped'
   durationMs: number
   error?: string
+  screenshot?: string
 }
 
 interface TestResult {
-  name: string
+  testCase: string
   file: string
-  status: 'PASS' | 'FAIL' | 'SKIP'
+  status: 'passed' | 'failed' | 'skipped'
   durationMs: number
   steps: StepResult[]
 }
 
 interface SuiteResult {
-  suiteName: string
-  startedAt: string
+  suite: string
+  startTime: string
   finishedAt: string
-  durationMs: number
+  totalDurationMs: number
   passed: number
   failed: number
   total: number
@@ -100,7 +100,7 @@ export default function ReportViewerPage() {
   )
 
   const passRate = suite.total > 0 ? Math.round((suite.passed / suite.total) * 100) : 0
-  const durationSec = (suite.durationMs / 1000).toFixed(1)
+  const durationSec = (suite.totalDurationMs / 1000).toFixed(1)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -109,7 +109,7 @@ export default function ReportViewerPage() {
         <div className="flex-1">
           <h2 className="text-base font-semibold text-slate-100">Test Results</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {suite.suiteName} · Ran at {new Date(suite.startedAt).toLocaleString()}
+            {suite.suite} · Ran at {new Date(suite.startTime).toLocaleString()}
           </p>
         </div>
         <button onClick={loadResults} className="btn-secondary flex items-center gap-2 text-xs py-2">
@@ -159,26 +159,26 @@ export default function ReportViewerPage() {
       {/* Test list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
         {suite.tests.map(test => (
-          <div key={test.name} className="card overflow-hidden p-0">
+          <div key={test.testCase} className="card overflow-hidden p-0">
             {/* Row */}
             <button
-              onClick={() => toggleExpand(test.name)}
+              onClick={() => toggleExpand(test.testCase)}
               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-700/50 transition-colors text-left"
             >
-              {expanded.has(test.name) ? <ChevronDown size={14} className="text-slate-500 flex-shrink-0" /> : <ChevronRight size={14} className="text-slate-500 flex-shrink-0" />}
-              {test.status === 'PASS'
+              {expanded.has(test.testCase) ? <ChevronDown size={14} className="text-slate-500 flex-shrink-0" /> : <ChevronRight size={14} className="text-slate-500 flex-shrink-0" />}
+              {test.status === 'passed'
                 ? <CheckCircle2 size={16} className="text-green-400 flex-shrink-0" />
-                : test.status === 'FAIL'
+                : test.status === 'failed'
                 ? <XCircle size={16} className="text-red-400 flex-shrink-0" />
                 : <Clock size={16} className="text-slate-500 flex-shrink-0" />
               }
-              <span className="flex-1 text-sm text-slate-200 font-medium">{test.name}</span>
+              <span className="flex-1 text-sm text-slate-200 font-medium">{test.testCase}</span>
               <span className="text-xs text-slate-500 font-mono">{(test.durationMs / 1000).toFixed(2)}s</span>
-              <span className={`text-xs font-semibold ml-4 ${test.status === 'PASS' ? 'text-green-400' : 'text-red-400'}`}>{test.status}</span>
+              <span className={`text-xs font-semibold ml-4 ${test.status === 'passed' ? 'text-green-400' : 'text-red-400'}`}>{test.status}</span>
             </button>
 
             {/* Steps expansion */}
-            {expanded.has(test.name) && (
+            {expanded.has(test.testCase) && (
               <div className="border-t border-surface-600 bg-surface-900/40">
                 <table className="w-full text-xs">
                   <thead>
@@ -188,20 +188,32 @@ export default function ReportViewerPage() {
                       <th className="text-left pb-1.5 pt-2 pr-4 font-normal">Duration</th>
                       <th className="text-left pb-1.5 pt-2 pr-4 font-normal">Status</th>
                       <th className="text-left pb-1.5 pt-2 pr-4 font-normal">Error</th>
+                      <th className="pb-1.5 pt-2 pr-4 font-normal"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {test.steps.map(step => (
-                      <tr key={step.step} className={`border-b border-surface-700/30 ${step.status === 'FAIL' ? 'bg-red-900/10' : ''}`}>
-                        <td className="py-1.5 pl-10 pr-4 text-slate-600">{step.step}</td>
+                    {test.steps.map((step, idx) => (
+                      <tr key={idx} className={`border-b border-surface-700/30 ${step.status === 'failed' ? 'bg-red-900/10' : ''}`}>
+                        <td className="py-1.5 pl-10 pr-4 text-slate-600">{idx + 1}</td>
                         <td className="py-1.5 pr-4 font-mono text-brand-300">{step.keyword}</td>
                         <td className="py-1.5 pr-4 text-slate-500">{step.durationMs}ms</td>
                         <td className="py-1.5 pr-4">
-                          <span className={step.status === 'PASS' ? 'badge-passed' : step.status === 'FAIL' ? 'badge-failed' : 'text-slate-500'}>
+                          <span className={step.status === 'passed' ? 'badge-passed' : step.status === 'failed' ? 'badge-failed' : 'text-slate-500'}>
                             {step.status}
                           </span>
                         </td>
                         <td className="py-1.5 pr-4 text-red-400 font-mono">{step.error ?? ''}</td>
+                        <td className="py-1.5 pr-4">
+                          {step.screenshot && (
+                            <button
+                              onClick={() => ipc?.shell.openPath(`${projectDir}/artifacts/${step.screenshot}`)}
+                              title="Open screenshot"
+                              className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-brand-300"
+                            >
+                              <Camera size={11} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -217,48 +229,48 @@ export default function ReportViewerPage() {
 
 function getMockSuite(): SuiteResult {
   return {
-    suiteName: 'Prabala Suite',
-    startedAt: new Date(Date.now() - 4210).toISOString(),
+    suite: 'Prabala Suite',
+    startTime: new Date(Date.now() - 4210).toISOString(),
     finishedAt: new Date().toISOString(),
-    durationMs: 4210,
+    totalDurationMs: 4210,
     passed: 2,
     failed: 0,
     total: 2,
     tests: [
       {
-        name: 'Add a new todo item',
+        testCase: 'Add a new todo item',
         file: 'tests/todo/add-todo.yaml',
-        status: 'PASS',
+        status: 'passed',
         durationMs: 2154,
         steps: [
-          { step: 1, keyword: 'Web.Launch', status: 'PASS', durationMs: 1203 },
-          { step: 2, keyword: 'NavigateTo', status: 'PASS', durationMs: 451 },
-          { step: 3, keyword: 'WaitForVisible', status: 'PASS', durationMs: 38 },
-          { step: 4, keyword: 'EnterText', status: 'PASS', durationMs: 88 },
-          { step: 5, keyword: 'PressKey', status: 'PASS', durationMs: 21 },
-          { step: 6, keyword: 'AssertVisible', status: 'PASS', durationMs: 12 },
-          { step: 7, keyword: 'AssertText', status: 'PASS', durationMs: 14 },
-          { step: 8, keyword: 'TakeScreenshot', status: 'PASS', durationMs: 67 },
-          { step: 9, keyword: 'Web.Close', status: 'PASS', durationMs: 260 },
+          { keyword: 'Web.Launch', status: 'passed', durationMs: 1203 },
+          { keyword: 'NavigateTo', status: 'passed', durationMs: 451 },
+          { keyword: 'WaitForVisible', status: 'passed', durationMs: 38 },
+          { keyword: 'EnterText', status: 'passed', durationMs: 88 },
+          { keyword: 'PressKey', status: 'passed', durationMs: 21 },
+          { keyword: 'AssertVisible', status: 'passed', durationMs: 12 },
+          { keyword: 'AssertText', status: 'passed', durationMs: 14 },
+          { keyword: 'TakeScreenshot', status: 'passed', durationMs: 67 },
+          { keyword: 'Web.Close', status: 'passed', durationMs: 260 },
         ]
       },
       {
-        name: 'Complete a todo and verify filter',
+        testCase: 'Complete a todo and verify filter',
         file: 'tests/todo/complete-todo.yaml',
-        status: 'PASS',
+        status: 'passed',
         durationMs: 2056,
         steps: [
-          { step: 1, keyword: 'Web.Launch', status: 'PASS', durationMs: 1100 },
-          { step: 2, keyword: 'NavigateTo', status: 'PASS', durationMs: 430 },
-          { step: 3, keyword: 'EnterText', status: 'PASS', durationMs: 80 },
-          { step: 4, keyword: 'PressKey', status: 'PASS', durationMs: 20 },
-          { step: 5, keyword: 'EnterText', status: 'PASS', durationMs: 70 },
-          { step: 6, keyword: 'PressKey', status: 'PASS', durationMs: 19 },
-          { step: 7, keyword: 'Click', status: 'PASS', durationMs: 55 },
-          { step: 8, keyword: 'Click', status: 'PASS', durationMs: 42 },
-          { step: 9, keyword: 'AssertVisible', status: 'PASS', durationMs: 15 },
-          { step: 10, keyword: 'TakeScreenshot', status: 'PASS', durationMs: 65 },
-          { step: 11, keyword: 'Web.Close', status: 'PASS', durationMs: 160 },
+          { keyword: 'Web.Launch', status: 'passed', durationMs: 1100 },
+          { keyword: 'NavigateTo', status: 'passed', durationMs: 430 },
+          { keyword: 'EnterText', status: 'passed', durationMs: 80 },
+          { keyword: 'PressKey', status: 'passed', durationMs: 20 },
+          { keyword: 'EnterText', status: 'passed', durationMs: 70 },
+          { keyword: 'PressKey', status: 'passed', durationMs: 19 },
+          { keyword: 'Click', status: 'passed', durationMs: 55 },
+          { keyword: 'Click', status: 'passed', durationMs: 42 },
+          { keyword: 'AssertVisible', status: 'passed', durationMs: 15 },
+          { keyword: 'TakeScreenshot', status: 'passed', durationMs: 65 },
+          { keyword: 'Web.Close', status: 'passed', durationMs: 160 },
         ]
       }
     ]

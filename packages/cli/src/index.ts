@@ -36,12 +36,14 @@ program
   .option('--browser <browser>', 'Browser to use: chromium | firefox | webkit', 'chromium')
   .option('--output <dir>', 'Output directory for artifacts and reports', 'artifacts')
   .option('--base-url <url>', 'Base URL override')
+  .option('--screenshot <mode>', 'Screenshot per step: always | onFailure | never', 'never')
   .action(async (pattern: string, opts: {
     config: string;
     headless: boolean;
     browser: string;
     output: string;
     baseUrl?: string;
+    screenshot: string;
   }) => {
     console.log(chalk.bold.magenta('\n🔮 Prabala v0.1.0\n'));
 
@@ -60,6 +62,9 @@ program
     if (opts.browser) config.browser = opts.browser as PrabalaConfig['browser'];
     if (opts.output) config.outputDir = opts.output;
     if (opts.baseUrl) config.baseUrl = opts.baseUrl;
+    if (opts.screenshot && opts.screenshot !== 'never') {
+      config.screenshotOnStep = opts.screenshot as PrabalaConfig['screenshotOnStep'];
+    }
 
     // Ensure object-repo and test-data defaults
     config.objectRepositoryDir = config.objectRepositoryDir ?? 'object-repository';

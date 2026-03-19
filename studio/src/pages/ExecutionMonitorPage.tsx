@@ -14,6 +14,7 @@ export default function ExecutionMonitorPage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [headless, setHeadless] = useState(true)
   const [browser, setBrowser] = useState('chromium')
+  const [screenshot, setScreenshot] = useState('onFailure')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rescanning, setRescanning] = useState(false)
 
@@ -79,7 +80,11 @@ export default function ExecutionMonitorPage() {
     setRunStatus('running')
 
     const pattern = buildPattern()
-    const extraArgs: string[] = ['--browser', browser, ...(headless ? ['--headless'] : [])]
+    const extraArgs: string[] = [
+      '--browser', browser,
+      '--screenshot', screenshot,
+      ...(headless ? ['--headless'] : []),
+    ]
 
     if (!ipc) {
       // Demo mode
@@ -181,6 +186,18 @@ export default function ExecutionMonitorPage() {
               className="accent-brand-500 w-3.5 h-3.5"
             />
           </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-400">Screenshots</label>
+            <select
+              className="input text-xs w-28 py-1"
+              value={screenshot}
+              onChange={e => setScreenshot(e.target.value)}
+            >
+              <option value="onFailure">On Failure</option>
+              <option value="always">Every Step</option>
+              <option value="never">Disabled</option>
+            </select>
+          </div>
         </div>
 
         {/* Run / Stop */}

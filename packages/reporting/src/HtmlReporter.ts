@@ -75,6 +75,12 @@ export class HtmlReporter {
     .progress-bar { height: 4px; background: #2a2a4a; }
     .progress-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #3b82f6);
                      transition: width 0.3s; }
+    .step-screenshot { margin-top: 6px; }
+    .step-screenshot summary { font-size: 11px; color: #6b7280; cursor: pointer;
+                               list-style: none; user-select: none; }
+    .step-screenshot summary::-webkit-details-marker { display: none; }
+    .step-screenshot img { max-width: 100%; border-radius: 6px; margin-top: 6px;
+                           border: 1px solid #2a2a4a; cursor: zoom-in; display: block; }
     details > summary { list-style: none; }
     details > summary::-webkit-details-marker { display: none; }
   </style>
@@ -138,12 +144,19 @@ export class HtmlReporter {
 
   private buildStepHtml(step: StepResult): string {
     const icon = step.status === 'passed' ? '✔' : step.status === 'failed' ? '✘' : '–';
+    const screenshotHtml = step.screenshot
+      ? `<details class="step-screenshot">
+           <summary>📷 Screenshot</summary>
+           <img src="${step.screenshot}" alt="step screenshot" />
+         </details>`
+      : '';
     return `
         <div class="step">
           <span class="step-icon ${step.status}">${icon}</span>
-          <div>
+          <div style="flex:1">
             <span class="step-kw">${this.escape(step.keyword)}</span>
             ${step.error ? `<div class="step-err">${this.escape(step.error)}</div>` : ''}
+            ${screenshotHtml}
           </div>
           <span class="step-dur">${step.durationMs}ms</span>
         </div>`;
