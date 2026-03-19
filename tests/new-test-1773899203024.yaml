@@ -1,0 +1,45 @@
+testCase: ramya
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://iot-ot-convergence.orangeglacier-4ff26b13.eastus.azurecontainerapps.io/tests
+  - keyword: EnterText
+    params:
+      locator: '[placeholder="Enter your username"]'
+      value: ad
+  - keyword: EnterText
+    params:
+      locator: '[placeholder="Enter your username"]'
+      value: admin
+  - keyword: EnterText
+    params:
+      locator: '[placeholder="Enter your username"]'
+      value: admin
+  - keyword: EnterText
+    params:
+      locator: '[placeholder="Enter your password"]'
+      value: admin
+  - keyword: EnterText
+    params:
+      locator: '[placeholder="Enter your password"]'
+      value: admin123
+  - keyword: Click
+    params:
+      locator: text=Sign In
+  - keyword: Click
+    params:
+      locator: text=Dashboard
+  - keyword: NavigateTo
+    params:
+      url: https://iot-ot-convergence.orangeglacier-4ff26b13.eastus.azurecontainerapps.io/
+  - keyword: Click
+    params:
+      locator: text=💧 Water HMI
+  - keyword: NavigateTo
+    params:
+      url: https://iot-ot-convergence.orangeglacier-4ff26b13.eastus.azurecontainerapps.io/water
+  - keyword: Click
+    params:
+      locator: text=🚪 Logout
+  - keyword: Web.Close

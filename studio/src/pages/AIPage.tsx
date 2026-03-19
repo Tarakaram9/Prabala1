@@ -306,10 +306,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-slate-400 mb-4">
           Enter your{' '}
           <a className="text-brand-300 underline cursor-pointer"
-            onClick={() => (window as any).prabala?.shell.openPath('https://console.anthropic.com/')}>
-            Anthropic API key
+            onClick={() => (window as any).prabala?.shell.openPath('https://platform.openai.com/api-keys')}>
+            OpenAI API key
           </a>{' '}
-          to enable Claude-powered test generation and analysis. The key is stored locally in{' '}
+          to enable GPT-4o-powered test generation and analysis. The key is stored locally in{' '}
           <span className="font-mono text-xs bg-surface-700 px-1 py-0.5 rounded">~/.prabala/ai.json</span>.
         </p>
 
@@ -318,7 +318,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             type="password"
             value={loading ? '' : key}
             onChange={e => setKey(e.target.value)}
-            placeholder="sk-ant-api03-…"
+            placeholder="sk-proj-…"
             className="input w-full font-mono text-sm pr-10"
             disabled={loading}
           />
@@ -355,7 +355,7 @@ function WelcomeScreen({ onSetKey }: { onSetKey: () => void }) {
       <div>
         <h1 className="text-2xl font-bold text-white mb-2">AI Co-Pilot</h1>
         <p className="text-slate-400 max-w-sm leading-relaxed">
-          Powered by Claude. Generate tests from natural language, analyze failures, and explore your app automatically.
+          Powered by GPT-4o. Generate tests from natural language, analyze failures, and explore your app automatically.
         </p>
       </div>
       <div className="grid grid-cols-3 gap-3 max-w-lg w-full">
@@ -376,7 +376,7 @@ function WelcomeScreen({ onSetKey }: { onSetKey: () => void }) {
         className="btn-primary flex items-center gap-2 px-6 py-3"
       >
         <Key size={16} />
-        Add Anthropic API Key to Get Started
+        Add OpenAI API Key to Get Started
       </button>
     </div>
   )
@@ -517,7 +517,7 @@ export default function AIPage() {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-600 flex-shrink-0">
         <Brain size={18} className="text-brand-400" />
         <span className="text-white font-semibold text-sm">AI Co-Pilot</span>
-        <span className="text-xs text-brand-300 bg-brand-900/40 px-2 py-0.5 rounded-full border border-brand-600/30 ml-1">Claude Sonnet</span>
+        <span className="text-xs text-brand-300 bg-brand-900/40 px-2 py-0.5 rounded-full border border-brand-600/30 ml-1">GPT-4o</span>
 
         <div className="flex-1" />
 
@@ -587,7 +587,7 @@ export default function AIPage() {
               Mode: {mode}
             </span>
             <span className="text-xs bg-surface-700 border border-surface-600 px-2.5 py-1 rounded-full text-slate-300 font-mono">
-              Model: claude-sonnet-4-5
+              Model: gpt-4o
             </span>
           </div>
         </div>

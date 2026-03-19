@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execFile, spawn } from 'child_process';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const RENDERER_URL = 'http://localhost:5173';
@@ -278,29 +278,33 @@ function registerIpcHandlers(): void {
   ipcMain.handle('ai:chat',
     async (_e, messages: { role: 'user' | 'assistant'; content: string }[], systemPrompt: string) => {
       const apiKey = readAiConfig().apiKey;
-      if (!apiKey) throw new Error('No API key configured. Go to AI Settings to add your Anthropic API key.');
+      if (!apiKey) throw new Error('No API key configured. Go to AI Settings to add your OpenAI API key.');
 
-      const client = new Anthropic({ apiKey });
+      const client = new OpenAI({ apiKey });
       const controller = new AbortController();
       activeStream = { controller };
       let fullText = '';
 
       try {
-        const stream = await client.messages.stream({
-          model: 'claude-sonnet-4-5',
+        const stream = await client.chat.completions.create({
+          model: 'gpt-4o',
           max_tokens: 4096,
-          system: systemPrompt,
-          messages,
+          stream: true,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...messages,
+          ],
         }, { signal: controller.signal });
 
         for await (const chunk of stream) {
-          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-            fullText += chunk.delta.text;
-            mainWindow?.webContents.send('ai:chunk', chunk.delta.text);
+          const token = chunk.choices[0]?.delta?.content ?? '';
+          if (token) {
+            fullText += token;
+            mainWindow?.webContents.send('ai:chunk', token);
           }
         }
       } catch (err: any) {
-        if (err.name !== 'AbortError') throw err;
+        if (err.name !== 'AbortError' && err.name !== 'APIUserAbortError') throw err;
       } finally {
         activeStream = null;
         mainWindow?.webContents.send('ai:done');
