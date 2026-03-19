@@ -4,7 +4,7 @@ import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
-  X, ChevronLeft, Zap, ClipboardList
+  X, ChevronLeft, Zap, ClipboardList, Wand2
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -12,7 +12,16 @@ import { loadProjectData } from '../utils/projectLoader'
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
 
-interface AIChatMsg { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean }
+interface AIChatMsg {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  streaming?: boolean
+  /** true = AI-generated automatically (not from user prompt) */
+  auto?: boolean
+  /** short label of what triggered this auto-analysis */
+  trigger?: string
+}
 
 function parseYamlToSteps(yamlText: string): Omit<TestStep, 'id'>[] | null {
   try {
@@ -155,6 +164,24 @@ export default function TestBuilderPage() {
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
   const aiMessagesEndRef = useRef<HTMLDivElement>(null)
   const aiInputRef = useRef<HTMLTextAreaElement>(null)
+
+  // ─ AI Auto-Assist state ───────────────────────────────────────────────────
+  const [aiAutoMode, setAiAutoMode] = useState(false)
+  // Refs that stay current inside debounce closures without re-renders
+  const aiAutoModeRef   = useRef(false)
+  const aiOpenRef       = useRef(false)
+  const aiStreamingRef  = useRef(false)
+  const aiConfigRef     = useRef<boolean | null>(null)
+  const autoTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Per-step AI issue annotations: stepId → warning text
+  const [stepWarnings, setStepWarnings] = useState<Record<string, string>>({})
+
+  // Keep refs in sync with state
+  useEffect(() => { aiAutoModeRef.current  = aiAutoMode  }, [aiAutoMode])
+  useEffect(() => { aiOpenRef.current      = aiOpen      }, [aiOpen])
+  useEffect(() => { aiStreamingRef.current = aiStreaming  }, [aiStreaming])
+  useEffect(() => { aiConfigRef.current    = aiConfigured }, [aiConfigured])
+
   const [rescanning, setRescanning] = useState(false)
 
   const tc = activeTestCase
@@ -183,6 +210,7 @@ export default function TestBuilderPage() {
     if (!tc) return
     const step = newStep(keyword)
     updateTestCase(tc.id, { steps: [...tc.steps, step] })
+    scheduleAutoAnalysis(`Step added: ${keyword}`, 2000)
   }
 
   // ─ Recording ──────────────────────────────────────────────────────────────
@@ -236,6 +264,9 @@ export default function TestBuilderPage() {
     if (current && (current.steps.length === 0 || current.steps[current.steps.length - 1].keyword !== 'Web.Close')) {
       appendStepToActive(newStep('Web.Close'))
     }
+
+    // Immediately trigger AI analysis when recording is done (no debounce)
+    scheduleAutoAnalysis('Recording completed', 500)
   }
 
   // Append a recorded step into the active test case via atomic store update
@@ -245,6 +276,8 @@ export default function TestBuilderPage() {
     step.params = { ...step.params, ...raw.params }
     appendStepToActive(step)
     setRecordedCount(n => n + 1)
+    // Debounce more aggressively during burst recording (3s)
+    scheduleAutoAnalysis(`Recorded: ${raw.keyword}`, 3000)
   }
 
   function removeStep(stepId: string) {
@@ -483,6 +516,7 @@ ${stepsYaml}\`\`\``
 
   function clearAiChat() {
     setAiMessages([])
+    setStepWarnings({})
     ipc_ai_abort()
   }
 
@@ -491,6 +525,141 @@ ${stepsYaml}\`\`\``
     ipc?.ai?.abort().catch(() => {})
     ipc?.ai?.removeListeners?.()
     setAiStreaming(false)
+  }
+
+  // ─ Auto-Assist engine ─────────────────────────────────────────────────────
+
+  /** Debounce wrapper — clears previous pending trigger before setting a new one */
+  function scheduleAutoAnalysis(reason: string, delayMs = 2000) {
+    if (!aiAutoModeRef.current || !aiOpenRef.current) return
+    if (autoTimerRef.current) clearTimeout(autoTimerRef.current)
+    autoTimerRef.current = setTimeout(() => {
+      autoTimerRef.current = null
+      triggerAutoAnalysis(reason)
+    }, delayMs)
+  }
+
+  /** Immediately fire an AI auto-analysis (called after debounce resolves) */
+  function triggerAutoAnalysis(reason: string) {
+    if (!aiAutoModeRef.current || !aiOpenRef.current) return
+    if (aiStreamingRef.current) return  // don't interrupt an ongoing stream
+    if (aiConfigRef.current === false) return
+    sendAIAutoAnalysis(reason)
+  }
+
+  /** Build a concise auto-analysis system prompt focused on instant corrections */
+  function buildAutoSystemPrompt(): string {
+    return `You are an AI co-pilot in AUTO-ASSIST mode inside Prabala Studio Test Builder.
+Your job is to silently watch test steps and give INSTANT, CONCISE feedback.
+
+## Response policy
+- If everything looks good → respond with exactly: ✓ Looks good.
+- If issues found → one short sentence identifying the problem, then the fix as a \`\`\`yaml steps:\`\`\` block
+- MAXIMUM 3 sentences of prose. No lengthy explanations.
+- ONLY output a YAML block if you have concrete corrected/missing steps to add.
+- Do NOT re-output steps that are already correct.
+
+## What to check
+- Empty or placeholder params that should have real values
+- Missing assertions after interactions (e.g. click without verify)
+- Missing waits before interactions on slow pages
+- Missing Web.Close / SAP.Disconnect / Desktop.CloseApp at end
+- Credentials hardcoded in YAML (should use {{TEST_DATA.xxx}})
+- Logical gaps: login without navigating, form submit without checking result
+- Wrong keyword for the action (e.g. EnterText used for a dropdown)
+
+## Available Keywords
+${Object.entries(KEYWORD_CATEGORIES).map(([cat, kws]) => `${cat}: ${kws.join(', ')}`).join('\n')}
+
+## Format for corrected steps
+\`\`\`yaml
+steps:
+  - keyword: AssertVisible
+    params:
+      locator: "#dashboard"
+\`\`\`
+`
+  }
+
+  async function sendAIAutoAnalysis(trigger: string) {
+    const ipc = (window as any).prabala
+    if (!ipc?.ai) return
+
+    // Get fresh steps from store (avoids stale closure)
+    const currentTc = useAppStore.getState().activeTestCase
+    if (!currentTc) return
+
+    const stepsYaml = currentTc.steps.length
+      ? yaml.dump({ steps: currentTc.steps.map(s => ({ keyword: s.keyword, params: s.params })) }, { lineWidth: 120 })
+      : '(no steps yet)'
+
+    const assistantId = crypto.randomUUID()
+    const autoMsg: AIChatMsg = { id: assistantId, role: 'assistant', content: '', streaming: true, auto: true, trigger }
+    setAiMessages(prev => [...prev, autoMsg])
+    setAiStreaming(true)
+    aiStreamingRef.current = true
+
+    const analysisRequest = [
+      {
+        role: 'user' as const,
+        content: `## Test: "${currentTc.testCase}"\nTrigger: ${trigger}\n\nCurrent steps:\n\`\`\`yaml\n${stepsYaml}\`\`\`\n\nReview these steps and respond per your instructions.`
+      }
+    ]
+
+    let buffer = ''
+    ipc.ai.removeListeners?.()
+    ipc.ai.onChunk((token: string) => {
+      buffer += token
+      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: buffer } : m))
+    })
+    ipc.ai.onDone(() => {
+      aiStreamingRef.current = false
+      setAiStreaming(false)
+      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, streaming: false } : m))
+      ipc.ai.removeListeners?.()
+      // Parse warnings from the response and annotate steps
+      parseAndAnnotateWarnings(buffer, currentTc.steps)
+    })
+
+    try {
+      await ipc.ai.chat(analysisRequest, buildAutoSystemPrompt())
+    } catch (err: any) {
+      const msg = String(err?.message ?? err)
+      setAiMessages(prev => prev.map(m =>
+        m.id === assistantId ? { ...m, content: `⚠️ ${msg}`, streaming: false, } : m
+      ))
+      aiStreamingRef.current = false
+      setAiStreaming(false)
+      ipc.ai.removeListeners?.()
+    }
+  }
+
+  /**
+   * Parse AI auto-analysis text and add warning badges on specific steps.
+   * Heuristic: if the AI mentions a keyword name, mark every step using that keyword.
+   */
+  function parseAndAnnotateWarnings(aiText: string, steps: TestStep[]) {
+    if (aiText.trim().startsWith('✓')) {
+      // All good — clear any existing warnings
+      setStepWarnings({})
+      return
+    }
+    const warnings: Record<string, string> = {}
+    // Extract the prose part (before the yaml block) as the warning hint
+    const prose = aiText.replace(/```[\s\S]*?```/g, '').trim()
+    const shortHint = prose.split('\n')[0].slice(0, 120)
+    // Match mentioned keyword fragments against actual steps
+    steps.forEach(step => {
+      const kwLower = step.keyword.toLowerCase()
+      if (prose.toLowerCase().includes(kwLower) || prose.toLowerCase().includes(step.keyword.split('.').pop()?.toLowerCase() ?? '')) {
+        warnings[step.id] = shortHint
+      }
+      // Also flag steps with completely empty required params
+      const requiredParams = KEYWORD_PARAMS[step.keyword] ?? []
+      const allEmpty = requiredParams.length > 0 && requiredParams.every(k => !step.params[k])
+      if (allEmpty) warnings[step.id] = warnings[step.id] ?? 'Required parameters are empty'
+    })
+    setStepWarnings(warnings)
   }
 
   function onDragOver(e: React.DragEvent, idx: number) { e.preventDefault(); setDragOver(idx) }
@@ -670,7 +839,7 @@ ${stepsYaml}\`\`\``
                     onDragOver={e => onDragOver(e, idx)}
                     onDrop={() => onDrop(idx)}
                     onDragLeave={() => setDragOver(null)}
-                    className={`card border-l-4 ${statusColor(step.keyword)} transition-all ${isDragTarget ? 'ring-2 ring-brand-500/50 scale-[1.01]' : ''}`}
+                    className={`card border-l-4 ${statusColor(step.keyword)} transition-all ${isDragTarget ? 'ring-2 ring-brand-500/50 scale-[1.01]' : ''} ${stepWarnings[step.id] ? 'ring-1 ring-amber-500/40' : ''}`}
                   >
                     {/* Step header */}
                     <div
@@ -680,6 +849,9 @@ ${stepsYaml}\`\`\``
                       <GripVertical size={13} className="text-slate-600 cursor-grab flex-shrink-0" />
                       <span className="text-xs text-slate-500 font-mono w-5 text-right flex-shrink-0">{idx + 1}</span>
                       <span className="text-sm font-semibold text-brand-300 flex-1 min-w-0 truncate">{step.keyword}</span>
+                      {stepWarnings[step.id] && (
+                        <span title={stepWarnings[step.id]} className="flex-shrink-0 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      )}
                       {paramKeys.length > 0 && (
                         <span className="text-xs text-slate-500 truncate max-w-[200px] hidden sm:block">
                           {Object.entries(step.params).filter(([,v]) => v).map(([k,v]) => `${k}=${v}`).join(' · ')}
@@ -699,6 +871,17 @@ ${stepsYaml}\`\`\``
                     {/* Expanded params */}
                     {isExpanded && (
                       <div className="px-4 pb-3 pt-1 border-t border-surface-500/50 space-y-2">
+                        {/* AI warning inline banner */}
+                        {stepWarnings[step.id] && (
+                          <div className="flex items-start gap-2 px-2 py-1.5 rounded-md bg-amber-950/40 border border-amber-700/40">
+                            <Wand2 size={11} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                            <span className="text-[11px] text-amber-300 leading-snug flex-1">{stepWarnings[step.id]}</span>
+                            <button
+                              onClick={e => { e.stopPropagation(); setStepWarnings(prev => { const n = {...prev}; delete n[step.id]; return n }) }}
+                              className="ml-auto text-amber-700 hover:text-amber-400 flex-shrink-0 p-0.5"
+                            ><X size={10} /></button>
+                          </div>
+                        )}
                         <input
                           className="input text-xs text-slate-400 italic"
                           value={step.description}
@@ -795,7 +978,27 @@ ${stepsYaml}\`\`\``
               <span className="text-sm font-semibold text-brand-300">AI Co-Pilot</span>
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-brand-600/40 text-brand-300">BETA</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
+              {/* Auto-Assist toggle */}
+              <button
+                onClick={() => {
+                  const next = !aiAutoMode
+                  setAiAutoMode(next)
+                  aiAutoModeRef.current = next // update ref immediately (useEffect is async)
+                  if (next) sendAIAutoAnalysis('Auto-Assist enabled')
+                  if (!next) setStepWarnings({}) // clear badges when disabling
+                }}
+                disabled={aiConfigured === false}
+                title={aiAutoMode ? 'Auto-Assist ON — click to disable' : 'Enable Auto-Assist: AI watches every step change'}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition-all border ${
+                  aiAutoMode
+                    ? 'bg-brand-600/50 border-brand-500/70 text-brand-200 shadow-[0_0_8px_rgba(99,102,241,0.4)]'
+                    : 'bg-surface-700/60 border-surface-500/40 text-slate-500 hover:text-slate-300 hover:border-brand-700/50'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                <Wand2 size={11} className={aiAutoMode ? 'animate-pulse' : ''} />
+                {aiAutoMode ? 'AUTO ON' : 'AUTO'}
+              </button>
               {aiMessages.length > 0 && (
                 <button onClick={clearAiChat} title="Clear chat" className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-300 transition-colors">
                   <Trash2 size={13} />
@@ -811,6 +1014,19 @@ ${stepsYaml}\`\`\``
               </button>
             </div>
           </div>
+
+          {/* Auto-Assist active banner */}
+          {aiAutoMode && (
+            <div className="mx-3 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-950/50 border border-brand-700/40">
+              <Wand2 size={11} className="text-brand-400 animate-pulse flex-shrink-0" />
+              <span className="text-[10px] text-brand-300">
+                <span className="font-semibold">Auto-Assist active</span> — AI reviews every step automatically
+              </span>
+              <button onClick={() => setAiAutoMode(false)} className="ml-auto text-brand-500 hover:text-brand-300 text-[10px]">
+                disable
+              </button>
+            </div>
+          )}
 
           {/* Not configured warning */}
           {aiConfigured === false && (
@@ -876,6 +1092,14 @@ ${stepsYaml}\`\`\``
                   </div>
                 ) : (
                   <div className="w-full space-y-2">
+                    {/* Auto-Assist header badge */}
+                    {msg.auto && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Wand2 size={10} className="text-brand-400" />
+                        <span className="text-[10px] text-brand-400 font-semibold">Auto-Assist</span>
+                        {msg.trigger && <span className="text-[10px] text-slate-600">· {msg.trigger}</span>}
+                      </div>
+                    )}
                     {msg.content === '' && msg.streaming ? (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-700/40 border border-surface-500/40">
                         <Loader2 size={12} className="animate-spin text-brand-400" />
