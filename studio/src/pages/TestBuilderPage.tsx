@@ -4,7 +4,7 @@ import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
-  X, ChevronLeft, Zap, ClipboardList, Wand2
+  X, ChevronLeft, Zap, ClipboardList, Wand2, Database
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -187,6 +187,54 @@ export default function TestBuilderPage() {
   useEffect(() => { aiConfigRef.current    = aiConfigured }, [aiConfigured])
 
   const [rescanning, setRescanning] = useState(false)
+
+  // ─ Test Data variables (for param picker) ────────────────────────────────
+  const [testDataVars, setTestDataVars] = useState<string[]>([])
+  const [paramPicker, setParamPicker] = useState<{ stepId: string; key: string } | null>(null)
+  const paramPickerRef = useRef<HTMLDivElement>(null)
+
+  // Load test data variable names from test-data/ files whenever projectDir changes
+  useEffect(() => {
+    async function loadTestDataVars() {
+      const ipc = (window as any).prabala
+      if (!ipc || !projectDir) return
+      try {
+        const dirPath = `${projectDir}/test-data`
+        const exists = await ipc.fs.exists(dirPath)
+        if (!exists) return
+        const entries: { name: string; isDir: boolean; path: string }[] = await ipc.fs.readDir(dirPath)
+        const keys: string[] = []
+        for (const e of entries) {
+          if (e.isDir) continue
+          const isJson = e.name.endsWith('.json')
+          const isYaml = e.name.endsWith('.yaml') || e.name.endsWith('.yml')
+          if (!isJson && !isYaml) continue
+          try {
+            const raw = await ipc.fs.readFile(e.path)
+            const parsed = isJson
+              ? JSON.parse(raw)
+              : (await import('js-yaml')).load(raw)
+            if (parsed && typeof parsed === 'object') {
+              Object.keys(parsed).forEach(k => { if (!keys.includes(k)) keys.push(k) })
+            }
+          } catch { /* skip malformed */ }
+        }
+        setTestDataVars(keys)
+      } catch { /* ignore */ }
+    }
+    loadTestDataVars()
+  }, [projectDir])
+
+  // Close param picker on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (paramPickerRef.current && !paramPickerRef.current.contains(e.target as Node)) {
+        setParamPicker(null)
+      }
+    }
+    if (paramPicker) document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [paramPicker])
 
   const tc = activeTestCase
 
@@ -924,12 +972,59 @@ steps:
                         {paramKeys.map(key => (
                           <div key={key} className="flex items-center gap-2">
                             <label className="text-xs text-slate-500 font-mono w-24 flex-shrink-0">{key}</label>
-                            <input
-                              className="input text-xs font-mono"
-                              value={step.params[key] ?? ''}
-                              onChange={e => updateParam(step.id, key, e.target.value)}
-                              placeholder={`{${key.toUpperCase()}} or @object-key`}
-                            />
+                            <div className="relative flex-1">
+                              <input
+                                className="input text-xs font-mono w-full pr-7"
+                                value={step.params[key] ?? ''}
+                                onChange={e => updateParam(step.id, key, e.target.value)}
+                                placeholder={`{${key.toUpperCase()}} or {{TEST_DATA.x}}`}
+                              />
+                              {/* Test Data picker button */}
+                              {testDataVars.length > 0 && (
+                                <button
+                                  type="button"
+                                  title="Insert test data variable"
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    setParamPicker(prev =>
+                                      prev?.stepId === step.id && prev?.key === key ? null
+                                        : { stepId: step.id, key }
+                                    )
+                                  }}
+                                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-brand-400 hover:bg-surface-600 transition-colors"
+                                >
+                                  <Database size={11} />
+                                </button>
+                              )}
+                              {/* Picker dropdown */}
+                              {paramPicker?.stepId === step.id && paramPicker?.key === key && (
+                                <div
+                                  ref={paramPickerRef}
+                                  className="absolute z-50 top-full mt-1 left-0 right-0 bg-surface-800 border border-brand-700/50 rounded-lg shadow-xl overflow-hidden"
+                                >
+                                  <div className="px-2 py-1.5 border-b border-surface-600 flex items-center gap-1.5">
+                                    <Database size={10} className="text-brand-400" />
+                                    <span className="text-[10px] text-brand-300 font-semibold">Test Data</span>
+                                    <span className="text-[10px] text-slate-600 ml-1">click to insert</span>
+                                  </div>
+                                  <div className="max-h-40 overflow-y-auto py-1">
+                                    {testDataVars.map(varKey => (
+                                      <button
+                                        key={varKey}
+                                        type="button"
+                                        onClick={() => {
+                                          updateParam(step.id, key, `{{TEST_DATA.${varKey}}}`)
+                                          setParamPicker(null)
+                                        }}
+                                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-brand-300 hover:bg-brand-800/40 hover:text-brand-200 transition-colors"
+                                      >
+                                        {`{{TEST_DATA.${varKey}}}`}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         ))}
                         <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer mt-1">

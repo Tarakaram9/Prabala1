@@ -60,10 +60,10 @@ export default function TestDataPage() {
       const dirPath = `${projectDir}/test-data`
       const exists = await ipc.fs.exists(dirPath)
       if (!exists) { setFiles([]); return }
-      const entries: { name: string; isFile: boolean }[] = await ipc.fs.readDir(dirPath)
+      const entries: { name: string; isDir: boolean; path: string }[] = await ipc.fs.readDir(dirPath)
       const loaded: DataFile[] = []
       for (const e of entries) {
-        if (!e.isFile) continue
+        if (e.isDir) continue
         const isJson = e.name.endsWith('.json')
         const isYaml = e.name.endsWith('.yaml') || e.name.endsWith('.yml')
         if (!isJson && !isYaml) continue
