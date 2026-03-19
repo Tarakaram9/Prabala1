@@ -1,7 +1,7 @@
 import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
-  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle
+  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle, GitBranch
 } from 'lucide-react'
 import { LucideIcon } from 'lucide-react'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { id: 'monitor',    label: 'Run Tests',        icon: PlayCircle },
   { id: 'report',     label: 'Reports',          icon: BarChart3 },
   { id: 'ai',         label: 'AI Co-Pilot',      icon: Brain,    badge: 'NEW' },
+  { id: 'pipeline',   label: 'CI/CD Pipeline',   icon: GitBranch, badge: 'CI' },
 ]
 
 export default function Sidebar() {

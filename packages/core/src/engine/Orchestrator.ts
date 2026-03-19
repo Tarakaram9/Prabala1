@@ -71,17 +71,29 @@ export class Orchestrator {
     if (files.length === 0) {
       throw new Error(`No test files found matching pattern: ${pattern}`);
     }
-
     console.log(chalk.bold.magenta('\n🔮 Prabala Test Runner\n'));
     console.log(chalk.gray(`  Pattern : ${pattern}`));
     console.log(chalk.gray(`  Files   : ${files.length} test case(s) found\n`));
+    return this.runFiles(files, pattern);
+  }
+
+  /** Run an explicit list of test file paths (used by CLI for tag-filtered runs). */
+  async runFiles(files: string[], suiteName?: string): Promise<SuiteResult> {
+    if (files.length === 0) {
+      throw new Error('No test files provided to runFiles()');
+    }
+
+    const label = suiteName ?? `${files.length} test(s)`;
+    console.log(chalk.bold.magenta('\n🔮 Prabala Test Runner\n'));
+    console.log(chalk.gray(`  Suite   : ${label}`));
+    console.log(chalk.gray(`  Files   : ${files.length} test case(s)\n`));
 
     // Load user-defined custom keywords from keywordsDir
     const kwDir = this.config.keywordsDir;
     if (kwDir && fs.existsSync(kwDir)) {
-      const kwFiles = fs.readdirSync(kwDir, { recursive: true } as any)
-        .filter((f: string) => f.endsWith('.js'))
-        .map((f: string) => path.join(kwDir, f));
+      const kwFiles = (fs.readdirSync(kwDir, { recursive: true } as any) as string[])
+        .filter((f) => f.endsWith('.js'))
+        .map((f) => path.join(kwDir, f));
       for (const kwFile of kwFiles) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -95,7 +107,6 @@ export class Orchestrator {
       }
     }
 
-    const suiteName = pattern;
     const startTime = new Date();
     const results: TestResult[] = [];
 
@@ -115,7 +126,7 @@ export class Orchestrator {
     const totalDurationMs = endTime.getTime() - startTime.getTime();
 
     const suiteResult: SuiteResult = {
-      suite: suiteName,
+      suite: label,
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
       totalDurationMs,

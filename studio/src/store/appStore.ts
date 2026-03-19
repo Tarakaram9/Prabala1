@@ -4,7 +4,7 @@
 
 import { create } from 'zustand'
 
-export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components'
+export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline'
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -68,6 +68,25 @@ export interface ComponentDef {
   description?: string
   params: string[]            // parameter names, e.g. ['username','password']
   steps: ComponentStep[]
+}
+
+// CI/CD Pipeline settings
+export interface PipelineSettings {
+  platform: 'github' | 'azure' | 'jenkins' | 'gitlab'
+  env: string           // dev | staging | prod
+  tags: string          // comma-separated
+  reporter: string      // html | junit | both
+  nodeVersion: string
+  runCmd: string        // custom run command override
+}
+
+export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
+  platform: 'github',
+  env: 'staging',
+  tags: '',
+  reporter: 'both',
+  nodeVersion: '20',
+  runCmd: '',
 }
 
 export interface RunLog {
@@ -145,6 +164,10 @@ interface AppState {
 
   // Delete a test case from the store (does NOT delete from disk)
   deleteTestCase: (id: string) => void
+
+  // Pipeline settings
+  pipelineSettings: PipelineSettings
+  setPipelineSettings: (s: Partial<PipelineSettings>) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -279,4 +302,8 @@ export const useAppStore = create<AppState>((set) => ({
             : s.activeTestCase,
       }
     }),
+
+  pipelineSettings: { ...DEFAULT_PIPELINE_SETTINGS },
+  setPipelineSettings: (updates) =>
+    set((s) => ({ pipelineSettings: { ...s.pipelineSettings, ...updates } })),
 }))

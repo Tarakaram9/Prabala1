@@ -8,6 +8,7 @@ import TestDataPage from './pages/TestDataPage'
 import ExecutionMonitorPage from './pages/ExecutionMonitorPage'
 import ReportViewerPage from './pages/ReportViewerPage'
 import AIPage from './pages/AIPage'
+import PipelinePage from './pages/PipelinePage'
 import LoginPage from './pages/LoginPage'
 import WorkspacePage from './pages/WorkspacePage'
 import { useAppStore } from './store/appStore'
@@ -39,6 +40,7 @@ export default function App() {
     monitor:    <ExecutionMonitorPage />,
     report:     <ReportViewerPage />,
     ai:         <AIPage />,
+    pipeline:   <PipelinePage />,
   }[activePage]
 
   return <Layout>{page}</Layout>

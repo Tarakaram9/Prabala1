@@ -5,11 +5,11 @@ steps:
   - keyword: EnterText
     params:
       locator: '[placeholder="Enter your username"]'
-      value: '{{TEST_DATA.username}}'
+      value: '{{TEST_DATA.Username}}'
   - keyword: EnterText
     params:
       locator: '[placeholder="Enter your password"]'
-      value: '{{TEST_DATA.password}}'
+      value: '{{TEST_DATA.Password}}'
   - keyword: AssertVisible
     params:
       locator: '#dashboard'
