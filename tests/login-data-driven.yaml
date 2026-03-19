@@ -1,0 +1,38 @@
+testCase: Login with Test Data Parameterization
+steps:
+  # Browser setup
+  - keyword: Web.Launch
+
+  # Navigate using a value from test-data/demo-data.json via {{TEST_DATA.key}}
+  - keyword: NavigateTo
+    params:
+      url: "{{TEST_DATA.appUrl}}"
+
+  # Wait for the login form to be ready
+  - keyword: WaitForVisible
+    params:
+      locator: "{{TEST_DATA.usernameLocator}}"
+
+  # Fill credentials — values come from test-data file, not hard-coded
+  - keyword: EnterText
+    params:
+      locator: "{{TEST_DATA.usernameLocator}}"
+      value: "{{TEST_DATA.username}}"
+
+  - keyword: EnterText
+    params:
+      locator: "{{TEST_DATA.passwordLocator}}"
+      value: "{{TEST_DATA.password}}"
+
+  - keyword: Click
+    params:
+      locator: "{{TEST_DATA.loginButton}}"
+
+  - keyword: WaitForNavigation
+
+  # Assert welcome message uses a data-driven expected value
+  - keyword: AssertVisible
+    params:
+      locator: "{{TEST_DATA.dashboardLocator}}"
+
+  - keyword: Web.Close

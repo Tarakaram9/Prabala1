@@ -1,7 +1,14 @@
 {
+  "appUrl": "https://demo.playwright.dev/todomvc",
+  "username": "testuser@prabala.io",
+  "password": "Test@1234",
+  "usernameLocator": "[placeholder='Email']",
+  "passwordLocator": "[type='password']",
+  "loginButton": "text=Sign In",
+  "dashboardLocator": "#dashboard",
   "todoItem1": "Buy groceries",
   "todoItem2": "Write Prabala tests",
   "todoItem3": "Review pull requests",
-  "username": "testuser@prabala.io",
-  "password": "Test@1234"
+  "searchQuery": "automation",
+  "expectedTitle": "TodoMVC"
 }

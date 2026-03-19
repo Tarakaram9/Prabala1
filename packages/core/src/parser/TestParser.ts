@@ -40,7 +40,10 @@ export class TestParser {
   }
 
   /**
-   * Resolve variable placeholders like {BASE_URL} and {TEST_DATA.username}
+   * Resolve variable placeholders.
+   * Supports both {{TEST_DATA.key}} (recommended, Handlebars-style)
+   * and legacy {TEST_DATA.key} (single-brace) syntax.
+   * Resolution order: TEST_DATA → ENV → variables → process.env
    */
   static resolveVariables(
     value: string,
@@ -48,16 +51,18 @@ export class TestParser {
     testData: Record<string, unknown>,
     env: Record<string, string> = {}
   ): string {
-    return value.replace(/\{([^}]+)\}/g, (_, key: string) => {
+    // Match {{key}} first (double-brace), then {key} (single-brace)
+    return value.replace(/\{\{([^}]+?)\}\}|\{([^{}]+)\}/g, (match, doubleKey, singleKey) => {
+      const key = (doubleKey ?? singleKey).trim();
       if (key.startsWith('TEST_DATA.')) {
         const dataKey = key.slice('TEST_DATA.'.length);
-        return String(testData[dataKey] ?? key);
+        return String(testData[dataKey] ?? match);
       }
       if (key.startsWith('ENV.')) {
         const envKey = key.slice('ENV.'.length);
-        return env[envKey] ?? process.env[envKey] ?? key;
+        return env[envKey] ?? process.env[envKey] ?? match;
       }
-      return String(variables[key] ?? env[key] ?? process.env[key] ?? key);
+      return String(variables[key] ?? env[key] ?? process.env[key] ?? match);
     });
   }
 
