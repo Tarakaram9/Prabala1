@@ -40,12 +40,19 @@ export interface TestCase {
   isDirty: boolean
 }
 
+export interface LocatorFallback {
+  strategy: string
+  locator: string
+}
+
 export interface ObjectEntry {
   key: string
   strategy: string
   locator: string
   description?: string
   page?: string
+  /** Ordered fallback locators used by self-healing engine */
+  fallbacks?: LocatorFallback[]
 }
 
 // Page definition metadata (URL, description per page)

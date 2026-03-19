@@ -1,0 +1,6 @@
+{
+  "name": "Test1",
+  "version": "0.1",
+  "browser": "chromium",
+  "outputDir": "/Users/ram/prabala/test1/artifacts"
+}

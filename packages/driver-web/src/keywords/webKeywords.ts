@@ -2,9 +2,12 @@
 // Prabala Web Driver – Web Keyword Library (Playwright-backed)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { KeywordDefinition, ExecutionContext, ObjectEntry } from '@prabala/core';
+import {
+  KeywordDefinition, ExecutionContext, ObjectEntry, PrabalaConfig,
+  healLocator, strategyToExpression,
+} from '@prabala/core';
 import { WebDriverSession } from '../WebDriverSession';
-import { Page } from 'playwright';
+import { Page, Locator } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -19,26 +22,44 @@ function getPage(context: ExecutionContext): Page {
   return session.page;
 }
 
-// ── Helper: resolve an ObjectEntry or raw locator string to a Playwright locator
-function buildLocator(page: Page, locatorRef: unknown) {
+// ── Helper: resolve a locator ref to a Playwright Locator with self-healing ─
+// Accepts: raw string locator OR ObjectEntry from the object repository.
+// When an ObjectEntry has fallbacks[] or aiRepair is configured in PrabalaConfig,
+// it automatically tries fallbacks and/or LLM repair before surfacing an error.
+async function resolveLocator(
+  page: Page,
+  locatorRef: unknown,
+  context: ExecutionContext,
+): Promise<Locator> {
+  // Raw string — no healing, pure Playwright
   if (typeof locatorRef === 'string') {
     return page.locator(locatorRef);
   }
+
   const obj = locatorRef as ObjectEntry;
-  switch (obj.strategy) {
-    case 'css':
-      return page.locator(obj.locator);
-    case 'xpath':
-      return page.locator(`xpath=${obj.locator}`);
-    case 'text':
-      return page.getByText(obj.locator);
-    case 'aria':
-      return page.locator(`[aria-label="${obj.locator}"]`);
-    case 'id':
-      return page.locator(`#${obj.locator}`);
-    default:
-      return page.locator(obj.locator);
+  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
+
+  // Fast path — no fallbacks and no AI repair configured
+  if (!obj.fallbacks?.length && !obj._healedLocator && !cfg.aiRepair) {
+    return page.locator(strategyToExpression(obj.strategy, obj.locator));
   }
+
+  // Find the object key by scanning the repository (O(n) but trivially fast)
+  const objectKey =
+    Object.entries(context.objectRepository).find(([, v]) => v === obj)?.[0] ?? 'element';
+
+  const result = await healLocator({
+    objectKey,
+    entry: obj,
+    aiCfg: cfg.aiRepair,
+    probe: async (expr: string) => {
+      try { return (await page.locator(expr).count()) > 0; } catch { return false; }
+    },
+    getHtml: () => page.content(),
+    objectRepositoryDir: cfg.objectRepositoryDir,
+  });
+
+  return page.locator(result.expression);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,7 +133,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).click();
+      await (await resolveLocator(page, params.locator, context)).click();
     },
   },
   {
@@ -121,7 +142,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).dblclick();
+      await (await resolveLocator(page, params.locator, context)).dblclick();
     },
   },
   {
@@ -130,7 +151,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).click({ button: 'right' });
+      await (await resolveLocator(page, params.locator, context)).click({ button: 'right' });
     },
   },
   {
@@ -139,7 +160,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'value'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const loc = buildLocator(page, params.locator);
+      const loc = await resolveLocator(page, params.locator, context);
       await loc.clear();
       await loc.fill(String(params.value));
     },
@@ -158,7 +179,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'option'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).selectOption(String(params.option));
+      await (await resolveLocator(page, params.locator, context)).selectOption(String(params.option));
     },
   },
   {
@@ -167,7 +188,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).hover();
+      await (await resolveLocator(page, params.locator, context)).hover();
     },
   },
   {
@@ -176,7 +197,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).scrollIntoViewIfNeeded();
+      await (await resolveLocator(page, params.locator, context)).scrollIntoViewIfNeeded();
     },
   },
   {
@@ -185,7 +206,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).check();
+      await (await resolveLocator(page, params.locator, context)).check();
     },
   },
   {
@@ -194,7 +215,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).uncheck();
+      await (await resolveLocator(page, params.locator, context)).uncheck();
     },
   },
   {
@@ -203,7 +224,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'filePath'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).setInputFiles(String(params.filePath));
+      await (await resolveLocator(page, params.locator, context)).setInputFiles(String(params.filePath));
     },
   },
 
@@ -214,7 +235,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).waitFor({ state: 'visible' });
+      await (await resolveLocator(page, params.locator, context)).waitFor({ state: 'visible' });
     },
   },
   {
@@ -223,7 +244,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await buildLocator(page, params.locator).waitFor({ state: 'hidden' });
+      await (await resolveLocator(page, params.locator, context)).waitFor({ state: 'hidden' });
     },
   },
   {
@@ -250,7 +271,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const loc = buildLocator(page, params.locator);
+      const loc = await resolveLocator(page, params.locator, context);
       const visible = await loc.isVisible();
       if (!visible) throw new Error(`Element is not visible: ${JSON.stringify(params.locator)}`);
     },
@@ -261,7 +282,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const loc = buildLocator(page, params.locator);
+      const loc = await resolveLocator(page, params.locator, context);
       const visible = await loc.isVisible();
       if (visible) throw new Error(`Element should not be visible: ${JSON.stringify(params.locator)}`);
     },
@@ -272,7 +293,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'expected'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const actual = await buildLocator(page, params.locator).innerText();
+      const actual = await (await resolveLocator(page, params.locator, context)).innerText();
       if (!actual.includes(String(params.expected))) {
         throw new Error(`Text assertion failed. Expected: "${params.expected}", Got: "${actual}"`);
       }
@@ -306,7 +327,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const enabled = await buildLocator(page, params.locator).isEnabled();
+      const enabled = await (await resolveLocator(page, params.locator, context)).isEnabled();
       if (!enabled) throw new Error(`Element is not enabled: ${JSON.stringify(params.locator)}`);
     },
   },
@@ -316,7 +337,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'expected'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const actual = await buildLocator(page, params.locator).inputValue();
+      const actual = await (await resolveLocator(page, params.locator, context)).inputValue();
       if (actual !== String(params.expected)) {
         throw new Error(`Value assertion failed. Expected: "${params.expected}", Got: "${actual}"`);
       }
@@ -330,7 +351,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'variable'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const text = await buildLocator(page, params.locator).innerText();
+      const text = await (await resolveLocator(page, params.locator, context)).innerText();
       context.variables[String(params.variable)] = text;
     },
   },
@@ -340,7 +361,7 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'variable'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const val = await buildLocator(page, params.locator).inputValue();
+      const val = await (await resolveLocator(page, params.locator, context)).inputValue();
       context.variables[String(params.variable)] = val;
     },
   },

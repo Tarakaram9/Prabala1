@@ -38,11 +38,23 @@ export interface ExecutionContext {
   driverInstances: Record<string, unknown>;
 }
 
+export type LocatorStrategy = 'css' | 'xpath' | 'aria' | 'text' | 'id' | 'role' | 'label' | 'placeholder' | 'testId' | 'automationId' | 'name';
+
+export interface LocatorFallback {
+  strategy: LocatorStrategy;
+  locator: string;
+}
+
 export interface ObjectEntry {
-  strategy: 'css' | 'xpath' | 'aria' | 'text' | 'id' | 'automationId' | 'name';
+  strategy: LocatorStrategy;
   locator: string;
   description?: string;
-  fallback?: Array<{ strategy: string; locator: string }>;
+  page?: string;
+  /** Ordered list of fallback locators tried when primary fails */
+  fallbacks?: LocatorFallback[];
+  /** Set by the self-healing engine when a fallback wins — written back to repo */
+  _healedStrategy?: LocatorStrategy;
+  _healedLocator?: string;
 }
 
 export interface ObjectRepository {
@@ -82,6 +94,19 @@ export interface ArtifactStore {
   traces: string[];
 }
 
+export interface AiRepairConfig {
+  /** Provider to use for LLM-based locator repair */
+  provider: 'ollama' | 'openai' | 'anthropic';
+  /** Model name — defaults: ollama=llama3, openai=gpt-4o-mini, anthropic=claude-haiku-3 */
+  model?: string;
+  /** API key (not needed for ollama) */
+  apiKey?: string;
+  /** Base URL — override for ollama (default: http://localhost:11434) or custom OpenAI proxy */
+  baseUrl?: string;
+  /** If true, write the healed locator back to the object repository YAML */
+  autoUpdateRepo?: boolean;
+}
+
 export interface PrabalaConfig {
   baseUrl?: string;
   browser?: 'chromium' | 'firefox' | 'webkit';
@@ -95,4 +120,6 @@ export interface PrabalaConfig {
   screenshotOnStep?: 'always' | 'onFailure' | 'never';
   keywordsDir?: string;
   env?: Record<string, string>;
+  /** AI-powered locator self-healing — set to enable */
+  aiRepair?: AiRepairConfig;
 }
