@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { TestParser } from '../parser/TestParser';
 import { TestEngine } from './TestEngine';
+import { KeywordRegistry } from '../keywords/KeywordRegistry';
 
 export class Orchestrator {
   private config: PrabalaConfig;
@@ -74,6 +75,25 @@ export class Orchestrator {
     console.log(chalk.bold.magenta('\n🔮 Prabala Test Runner\n'));
     console.log(chalk.gray(`  Pattern : ${pattern}`));
     console.log(chalk.gray(`  Files   : ${files.length} test case(s) found\n`));
+
+    // Load user-defined custom keywords from keywordsDir
+    const kwDir = this.config.keywordsDir;
+    if (kwDir && fs.existsSync(kwDir)) {
+      const kwFiles = fs.readdirSync(kwDir, { recursive: true } as any)
+        .filter((f: string) => f.endsWith('.js'))
+        .map((f: string) => path.join(kwDir, f));
+      for (const kwFile of kwFiles) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const mod = require(path.resolve(kwFile));
+          const defs = Array.isArray(mod) ? mod : mod.default ? (Array.isArray(mod.default) ? mod.default : [mod.default]) : typeof mod === 'object' ? Object.values(mod) : [];
+          KeywordRegistry.registerMany(defs as any);
+          console.log(chalk.gray(`  Keywords : loaded ${defs.length} from ${path.basename(kwFile)}`));
+        } catch (e) {
+          console.warn(chalk.yellow(`  [Keywords] Failed to load ${kwFile}: ${(e as Error).message}`));
+        }
+      }
+    }
 
     const suiteName = pattern;
     const startTime = new Date();

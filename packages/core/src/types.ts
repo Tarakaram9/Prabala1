@@ -93,5 +93,6 @@ export interface PrabalaConfig {
   parallel?: number;
   retries?: number;
   screenshotOnStep?: 'always' | 'onFailure' | 'never';
+  keywordsDir?: string;
   env?: Record<string, string>;
 }

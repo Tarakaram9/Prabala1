@@ -7,5 +7,6 @@ timeout: 30000
 objectRepositoryDir: object-repository
 testDataDir: test-data
 outputDir: artifacts
+keywordsDir: keywords
 env:
   ENVIRONMENT: "dev"

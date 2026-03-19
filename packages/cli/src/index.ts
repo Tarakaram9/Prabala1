@@ -37,6 +37,7 @@ program
   .option('--output <dir>', 'Output directory for artifacts and reports', 'artifacts')
   .option('--base-url <url>', 'Base URL override')
   .option('--screenshot <mode>', 'Screenshot per step: always | onFailure | never', 'never')
+  .option('--keywords <dir>', 'Directory containing custom keyword .js files')
   .action(async (pattern: string, opts: {
     config: string;
     headless: boolean;
@@ -44,6 +45,7 @@ program
     output: string;
     baseUrl?: string;
     screenshot: string;
+    keywords?: string;
   }) => {
     console.log(chalk.bold.magenta('\n🔮 Prabala v0.1.0\n'));
 
@@ -65,6 +67,7 @@ program
     if (opts.screenshot && opts.screenshot !== 'never') {
       config.screenshotOnStep = opts.screenshot as PrabalaConfig['screenshotOnStep'];
     }
+    if (opts.keywords) config.keywordsDir = opts.keywords;
 
     // Ensure object-repo and test-data defaults
     config.objectRepositoryDir = config.objectRepositoryDir ?? 'object-repository';

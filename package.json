@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:packages": "npm run build -w packages/core && npm run build -w packages/reporting && npm run build -w packages/cli",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint packages/*/src/**/*.ts",
     "prabala": "node packages/cli/dist/index.js"
