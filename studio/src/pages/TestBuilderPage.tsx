@@ -1,13 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAppStore, TestCase, TestStep } from '../store/appStore'
 import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
-  CheckCircle2, AlertCircle, Loader2
+  CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
+  X, ChevronLeft, Zap, ClipboardList
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
 import { loadProjectData } from '../utils/projectLoader'
+
+// ── AI helpers ────────────────────────────────────────────────────────────────
+
+interface AIChatMsg { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean }
+
+function parseYamlToSteps(yamlText: string): Omit<TestStep, 'id'>[] | null {
+  try {
+    const doc = yaml.load(yamlText) as any
+    const rawSteps: any[] = Array.isArray(doc) ? doc : (doc?.steps ?? null)
+    if (!Array.isArray(rawSteps)) return null
+    return rawSteps.map(s => ({
+      keyword: String(s.keyword ?? ''),
+      params: s.params && typeof s.params === 'object' ? s.params : {},
+      description: s.description ?? '',
+      continueOnFailure: s.continueOnFailure ?? false,
+    })).filter(s => s.keyword)
+  } catch { return null }
+}
+
+/** Splits assistant text into plain-text and yaml code-block segments */
+function splitContent(text: string) {
+  const parts: { type: 'text' | 'yaml'; content: string }[] = []
+  const re = /```(?:yaml|yml)\n([\s\S]*?)```/g
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push({ type: 'text', content: text.slice(last, m.index) })
+    parts.push({ type: 'yaml', content: m[1] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push({ type: 'text', content: text.slice(last) })
+  return parts
+}
 
 const KEYWORD_CATEGORIES: Record<string, string[]> = {
   'Browser': ['Web.Launch', 'Web.Close', 'NavigateTo', 'GoBack', 'Reload'],
@@ -73,11 +106,20 @@ function newTestCase(): TestCase {
 }
 
 export default function TestBuilderPage() {
-  const { testCases, activeTestCase, setActiveTestCase, setTestCases, updateTestCase, appendStepToActive, markSaved, projectDir, deleteTestCase } = useAppStore()
+  const { testCases, activeTestCase, setActiveTestCase, setTestCases, updateTestCase, appendStepToActive, markSaved, projectDir, deleteTestCase, setActivePage } = useAppStore()
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState<number | null>(null)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [kwPanelOpen, setKwPanelOpen] = useState(true)
+
+  // ─ AI Co-Pilot state ──────────────────────────────────────────────────────
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiMessages, setAiMessages] = useState<AIChatMsg[]>([])
+  const [aiInput, setAiInput] = useState('')
+  const [aiStreaming, setAiStreaming] = useState(false)
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
+  const aiMessagesEndRef = useRef<HTMLDivElement>(null)
+  const aiInputRef = useRef<HTMLTextAreaElement>(null)
   const [rescanning, setRescanning] = useState(false)
 
   const tc = activeTestCase
@@ -271,6 +313,139 @@ export default function TestBuilderPage() {
 
   // Drag reorder
   function onDragStart(idx: number) { setDragIdx(idx) }
+
+  // ─ AI Co-Pilot ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const ipc = (window as any).prabala
+    if (!ipc?.ai) { setAiConfigured(false); return }
+    ipc.ai.getConfig().then((cfg: any) => {
+      setAiConfigured(!!(cfg?.apiKey && cfg?.endpoint && cfg?.deployment))
+    }).catch(() => setAiConfigured(false))
+  }, [aiOpen])
+
+  useEffect(() => {
+    aiMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [aiMessages])
+
+  function buildBuilderSystemPrompt() {
+    const allKws = Object.values(KEYWORD_CATEGORIES).flat()
+    return `You are an expert Prabala test-automation AI assistant embedded directly inside the Test Builder.
+The user is building a test case step-by-step. Your job is to help them add, fix, and improve test steps.
+
+## Available Keywords
+${allKws.map(k => `- ${k}`).join('\n')}
+
+## Prabala YAML Step Format
+When you output steps, wrap them in a YAML code block like this:
+\`\`\`yaml
+steps:
+  - keyword: NavigateTo
+    params:
+      url: "https://example.com"
+  - keyword: Click
+    params:
+      locator: "#loginBtn"
+\`\`\`
+
+The user can click "Insert into Test" to inject those steps directly into their test.
+
+## Rules
+- Output ONLY the steps array inside the yaml block (not the full test file) unless the user asks for a full file
+- Use correct keyword names from the list above
+- Use 2-space YAML indentation
+- For locators use CSS selectors (#id, .class) or XPath (//tag[@attr='val'])
+- Be concise — show the YAML then a brief 1-2 sentence explanation
+- If the user pastes a failure log, analyse it and suggest the fixed YAML steps
+`
+  }
+
+  function buildContextMessage() {
+    if (!tc) return ''
+    const stepsYaml = tc.steps.length
+      ? yaml.dump({ steps: tc.steps.map(s => ({ keyword: s.keyword, params: s.params, description: s.description || undefined })) }, { lineWidth: 120 })
+      : '(no steps yet)'
+    return `## Current Test: "${tc.testCase}"
+Tags: ${tc.tags.join(', ') || '(none)'}
+Step count: ${tc.steps.length}
+
+\`\`\`yaml
+${stepsYaml}\`\`\``
+  }
+
+  async function sendAIMessage() {
+    const text = aiInput.trim()
+    if (!text || aiStreaming) return
+    const ipc = (window as any).prabala
+    if (!ipc?.ai) return
+
+    const userMsg: AIChatMsg = { id: crypto.randomUUID(), role: 'user', content: text }
+    const assistantId = crypto.randomUUID()
+    const assistantMsg: AIChatMsg = { id: assistantId, role: 'assistant', content: '', streaming: true }
+    setAiMessages(prev => [...prev, userMsg, assistantMsg])
+    setAiInput('')
+    setAiStreaming(true)
+
+    // Prepend context about current test state as a system-level user message
+    const contextBlock = buildContextMessage()
+    const allMessages = [
+      ...aiMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: contextBlock ? `${contextBlock}\n\n---\n\n${text}` : text },
+    ]
+
+    let buffer = ''
+    ipc.ai.removeListeners?.()
+    ipc.ai.onChunk((token: string) => {
+      buffer += token
+      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: buffer } : m))
+    })
+    ipc.ai.onDone(() => {
+      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, streaming: false } : m))
+      setAiStreaming(false)
+      ipc.ai.removeListeners?.()
+    })
+
+    try {
+      await ipc.ai.chat(allMessages, buildBuilderSystemPrompt())
+    } catch (err: any) {
+      const errText = err?.message ?? String(err)
+      setAiMessages(prev => prev.map(m =>
+        m.id === assistantId ? { ...m, content: `⚠️ ${errText}`, streaming: false } : m
+      ))
+      setAiStreaming(false)
+      ipc.ai.removeListeners?.()
+    }
+  }
+
+  function insertStepsFromYaml(yamlText: string) {
+    if (!tc) return
+    const parsed = parseYamlToSteps(yamlText)
+    if (!parsed || parsed.length === 0) return
+    const newSteps: TestStep[] = parsed.map(s => ({
+      ...s,
+      id: crypto.randomUUID(),
+      params: s.params as Record<string, string>,
+    }))
+    updateTestCase(tc.id, { steps: [...tc.steps, ...newSteps] })
+    // expand the newly added steps
+    setExpandedSteps(prev => {
+      const next = new Set(prev)
+      newSteps.forEach(s => next.add(s.id))
+      return next
+    })
+  }
+
+  function clearAiChat() {
+    setAiMessages([])
+    ipc_ai_abort()
+  }
+
+  function ipc_ai_abort() {
+    const ipc = (window as any).prabala
+    ipc?.ai?.abort().catch(() => {})
+    ipc?.ai?.removeListeners?.()
+    setAiStreaming(false)
+  }
+
   function onDragOver(e: React.DragEvent, idx: number) { e.preventDefault(); setDragOver(idx) }
   function onDrop(toIdx: number) {
     if (dragIdx === null || !tc) return
@@ -375,6 +550,20 @@ export default function TestBuilderPage() {
                    saveStatus === 'ok'     ? 'Saved!' :
                    saveStatus === 'error'  ? 'Failed!' :
                                             'Save'}
+                </button>
+
+                {/* ✦ AI Co-Pilot toggle */}
+                <button
+                  onClick={() => setAiOpen(o => !o)}
+                  title="AI Co-Pilot"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    aiOpen
+                      ? 'bg-brand-600/40 text-brand-200 border border-brand-500/50'
+                      : 'bg-surface-600 hover:bg-brand-900/40 text-slate-300 hover:text-brand-300 border border-surface-400'
+                  }`}
+                >
+                  <Brain size={13} />
+                  AI
                 </button>
               </div>
             </div>
@@ -547,6 +736,166 @@ export default function TestBuilderPage() {
           </div>
         )}
       </div>
+
+      {/* ── AI Co-Pilot Panel ───────────────────────────────────────── */}
+      {aiOpen && (
+        <div className="w-96 flex-shrink-0 bg-surface-900 border-l border-brand-700/40 flex flex-col">
+          {/* Panel header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-surface-500 bg-surface-800/60">
+            <div className="flex items-center gap-2">
+              <Brain size={15} className="text-brand-400" />
+              <span className="text-sm font-semibold text-brand-300">AI Co-Pilot</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-brand-600/40 text-brand-300">BETA</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {aiMessages.length > 0 && (
+                <button onClick={clearAiChat} title="Clear chat" className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-300 transition-colors">
+                  <Trash2 size={13} />
+                </button>
+              )}
+              {aiStreaming && (
+                <button onClick={ipc_ai_abort} title="Stop generating" className="p-1.5 rounded hover:bg-red-900/40 text-slate-500 hover:text-red-400 transition-colors">
+                  <X size={13} />
+                </button>
+              )}
+              <button onClick={() => setAiOpen(false)} className="p-1.5 rounded hover:bg-surface-600 text-slate-500 hover:text-slate-300 transition-colors">
+                <ChevronLeft size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Not configured warning */}
+          {aiConfigured === false && (
+            <div className="mx-3 mt-3 p-3 rounded-lg bg-amber-950/40 border border-amber-700/40 text-xs text-amber-300">
+              <div className="flex items-start gap-2">
+                <Brain size={14} className="flex-shrink-0 mt-0.5 text-amber-400" />
+                <div>
+                  Azure AI not configured.{' '}
+                  <button
+                    onClick={() => setActivePage('ai')}
+                    className="underline hover:text-amber-200 transition-colors"
+                  >
+                    Open AI Co-Pilot settings
+                  </button>
+                  {' '}to add your credentials, then come back here.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Context pill */}
+          {tc && (
+            <div className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-700/50 border border-surface-500/50">
+              <ClipboardList size={12} className="text-brand-400 flex-shrink-0" />
+              <span className="text-xs text-slate-400 truncate">
+                <span className="text-brand-300 font-medium">{tc.testCase}</span>
+                <span className="text-slate-600"> · {tc.steps.length} step{tc.steps.length !== 1 ? 's' : ''}</span>
+              </span>
+              <span className="ml-auto text-[10px] text-slate-600 flex-shrink-0">in context</span>
+            </div>
+          )}
+
+          {/* Quick-action chips */}
+          {aiMessages.length === 0 && (
+            <div className="px-3 mt-3 space-y-1.5">
+              <p className="text-[10px] text-slate-600 font-semibold uppercase tracking-wider mb-2">Quick actions</p>
+              {[
+                { icon: <Sparkles size={11} />, label: 'Generate login test steps', prompt: 'Generate login test steps with username, password fields and submit button' },
+                { icon: <Zap size={11} />, label: 'Add assertions for current steps', prompt: 'Review my current steps and add appropriate assertion steps to verify the expected outcomes' },
+                { icon: <Brain size={11} />, label: 'Explain what this test does', prompt: 'Explain what my current test case does in plain English' },
+                { icon: <ClipboardList size={11} />, label: 'Suggest improvements', prompt: 'Review my test steps and suggest improvements for reliability, completeness, and best practices' },
+              ].map(q => (
+                <button
+                  key={q.label}
+                  disabled={aiConfigured === false}
+                  onClick={() => { setAiInput(q.prompt); setTimeout(() => aiInputRef.current?.focus(), 50) }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-700/60 hover:bg-surface-600/60 border border-surface-500/40 hover:border-brand-700/50 text-xs text-slate-400 hover:text-slate-200 transition-all text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-brand-400 flex-shrink-0">{q.icon}</span>
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+            {aiMessages.map(msg => (
+              <div key={msg.id} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                {msg.role === 'user' ? (
+                  <div className="max-w-[85%] px-3 py-2 rounded-xl bg-brand-700/40 border border-brand-600/40 text-xs text-slate-200">
+                    {msg.content}
+                  </div>
+                ) : (
+                  <div className="w-full space-y-2">
+                    {msg.content === '' && msg.streaming ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-700/40 border border-surface-500/40">
+                        <Loader2 size={12} className="animate-spin text-brand-400" />
+                        <span className="text-xs text-slate-500">Thinking…</span>
+                      </div>
+                    ) : (
+                      splitContent(msg.content).map((part, pi) =>
+                        part.type === 'text' ? (
+                          <div key={pi} className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed px-1">
+                            {part.content.trim()}
+                          </div>
+                        ) : (
+                          <div key={pi} className="rounded-lg border border-surface-500/60 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 bg-surface-700/60 border-b border-surface-500/40">
+                              <span className="text-[10px] font-mono text-slate-500">yaml</span>
+                              <button
+                                disabled={!tc}
+                                onClick={() => insertStepsFromYaml(part.content)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-brand-600/40 hover:bg-brand-600/70 border border-brand-500/50 text-brand-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Zap size={10} />
+                                Insert into Test
+                              </button>
+                            </div>
+                            <pre className="text-[11px] text-slate-300 font-mono px-3 py-2 overflow-x-auto bg-surface-800/60">
+                              {part.content.trimEnd()}
+                            </pre>
+                          </div>
+                        )
+                      )
+                    )}
+                    {msg.streaming && msg.content !== '' && (
+                      <span className="inline-block w-1.5 h-3 bg-brand-400 animate-pulse ml-1 rounded-sm" />
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div ref={aiMessagesEndRef} />
+          </div>
+
+          {/* Input area */}
+          <div className="px-3 pb-3 pt-2 border-t border-surface-500/50">
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={aiInputRef}
+                value={aiInput}
+                onChange={e => setAiInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage() }
+                }}
+                disabled={aiConfigured === false || aiStreaming}
+                rows={2}
+                className="flex-1 input text-xs resize-none font-normal disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder={aiConfigured === false ? 'Configure Azure AI first…' : 'Ask AI to add steps, fix issues… (Enter to send)'}
+              />
+              <button
+                onClick={sendAIMessage}
+                disabled={!aiInput.trim() || aiStreaming || aiConfigured === false}
+                className="flex-shrink-0 p-2.5 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+              >
+                {aiStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-600 mt-1.5 text-center">Current test steps sent as context · Shift+Enter for newline</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
