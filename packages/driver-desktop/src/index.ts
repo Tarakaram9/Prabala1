@@ -1,59 +1,403 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Prabala Desktop Driver – Stub (Phase 2)
-// Supports: WinAppDriver (Windows), Appium Mac2 (macOS), AT-SPI (Linux)
+// Prabala Desktop Driver – Keyword Library (Appium-backed)
+//
+// Supported locator formats:
+//   id=value            accessibility id (recommended, works everywhere)
+//   automationId=value  alias for id=
+//   name=value          element name attribute
+//   xpath=//path        XPath expression
+//   class=ClassName     class name
+//   ~value              raw accessibility id shorthand
+//   //xpath             raw XPath pass-through
+//   plain string        treated as accessibility id
+//
+// Quick-start:
+//   npm install -g appium
+//   appium driver install mac2      # macOS
+//   appium driver install windows   # Windows
+//   appium                          # start server, then run your tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+import * as path from 'path';
+import * as fs from 'fs';
 import { KeywordDefinition, ExecutionContext } from '@prabala/core';
+import { DesktopSession } from './DesktopSession';
+
+
+// ── Context helper ─────────────────────────────────────────────────────────
+function getSession(context: ExecutionContext): DesktopSession {
+  const session = context.driverInstances['desktop'] as DesktopSession | undefined;
+  if (!session) throw new Error(
+    'No desktop session active — use Desktop.LaunchApp first.'
+  );
+  return session;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Keyword Definitions
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const desktopKeywords: KeywordDefinition[] = [
+
+  // ── App lifecycle ──────────────────────────────────────────────────────────
+
   {
     name: 'Desktop.LaunchApp',
-    description: 'Launch a desktop application',
-    params: ['appPath', 'platform'],
-    execute: async (params, _context: ExecutionContext) => {
-      console.log(`[Desktop] Launching app: ${params.appPath} on ${params.platform ?? process.platform}`);
-      // TODO (Phase 2): Integrate WinAppDriver / Appium Mac2 / AT-SPI
-      throw new Error('Desktop.LaunchApp — Phase 2 feature. Coming soon!');
+    description: [
+      'Launch a desktop application via Appium.',
+      'Requires Appium server running (appium &) with the appropriate driver installed.',
+      'appPath: .app path or bundle ID on macOS; .exe path on Windows.',
+      'platform: darwin|mac|win32|windows|linux — auto-detected if omitted.',
+      'appiumUrl: Appium server URL, default http://localhost:4723.',
+    ].join(' '),
+    params: ['appPath', 'platform', 'appiumUrl'],
+    execute: async (params, context) => {
+      const session = new DesktopSession();
+      await session.launch({
+        appPath:   String(params.appPath),
+        platform:  params.platform  ? String(params.platform)  : undefined,
+        appiumUrl: params.appiumUrl ? String(params.appiumUrl) : undefined,
+      });
+      context.driverInstances['desktop'] = session;
+      context.currentDriver = 'desktop';
+      console.log(`[Desktop] App launched: ${params.appPath}`);
     },
   },
-  {
-    name: 'Desktop.Click',
-    description: 'Click a desktop UI element by AutomationId, Name, or ClassName',
-    params: ['locator'],
-    execute: async (params, _context: ExecutionContext) => {
-      console.log(`[Desktop] Click: ${params.locator}`);
-      throw new Error('Desktop.Click — Phase 2 feature. Coming soon!');
-    },
-  },
-  {
-    name: 'Desktop.EnterText',
-    description: 'Type text into a desktop input element',
-    params: ['locator', 'value'],
-    execute: async (params, _context: ExecutionContext) => {
-      console.log(`[Desktop] EnterText: ${params.locator} = ${params.value}`);
-      throw new Error('Desktop.EnterText — Phase 2 feature. Coming soon!');
-    },
-  },
-  {
-    name: 'Desktop.AssertVisible',
-    description: 'Assert a desktop UI element is visible',
-    params: ['locator'],
-    execute: async (params, _context: ExecutionContext) => {
-      console.log(`[Desktop] AssertVisible: ${params.locator}`);
-      throw new Error('Desktop.AssertVisible — Phase 2 feature. Coming soon!');
-    },
-  },
+
   {
     name: 'Desktop.CloseApp',
-    description: 'Close the desktop application',
+    description: 'Close the desktop application and end the Appium session.',
     params: [],
-    execute: async (_params, _context: ExecutionContext) => {
-      throw new Error('Desktop.CloseApp — Phase 2 feature. Coming soon!');
+    execute: async (_params, context) => {
+      const session = context.driverInstances['desktop'] as DesktopSession | undefined;
+      if (session) {
+        await session.close();
+        delete context.driverInstances['desktop'];
+        console.log('[Desktop] App closed.');
+      }
     },
   },
+
+  // ── Mouse actions ──────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.Click',
+    description: 'Click a UI element.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      await el.waitForDisplayed({ timeout: session.defaultTimeout });
+      await el.click();
+    },
+  },
+
+  {
+    name: 'Desktop.DoubleClick',
+    description: 'Double-click a UI element.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      await el.waitForDisplayed({ timeout: session.defaultTimeout });
+      await el.doubleClick();
+    },
+  },
+
+  {
+    name: 'Desktop.RightClick',
+    description: 'Right-click a UI element to open its context menu.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      await el.waitForDisplayed({ timeout: session.defaultTimeout });
+      await el.click({ button: 'right' });
+    },
+  },
+
+  {
+    name: 'Desktop.Hover',
+    description: 'Move the mouse over a UI element without clicking.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      await el.moveTo();
+    },
+  },
+
+  // ── Keyboard actions ───────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.EnterText',
+    description: 'Click an input element and type text into it.',
+    params: ['locator', 'value'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      await el.waitForDisplayed({ timeout: session.defaultTimeout });
+      await el.click();
+      await el.setValue(String(params.value));
+    },
+  },
+
+  {
+    name: 'Desktop.ClearText',
+    description: 'Clear all text from an input field.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      await el.clearValue();
+    },
+  },
+
+  {
+    name: 'Desktop.PressKey',
+    description: [
+      'Press a keyboard key or shortcut.',
+      'Simple: Enter, Tab, Escape, F5, ArrowDown, Delete.',
+      'Combination: Control+a, Command+c, Shift+Tab, Control+Shift+Delete.',
+    ].join(' '),
+    params: ['key'],
+    execute: async (params, context) => {
+      await getSession(context).pressKey(String(params.key));
+    },
+  },
+
+  // ── Wait ───────────────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.WaitForVisible',
+    description: 'Wait until a UI element becomes visible. Default timeout: 30s.',
+    params: ['locator', 'timeout'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
+      await el.waitForDisplayed({ timeout });
+    },
+  },
+
+  {
+    name: 'Desktop.WaitForHidden',
+    description: 'Wait until a UI element is no longer visible. Default timeout: 30s.',
+    params: ['locator', 'timeout'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
+      await el.waitForDisplayed({ timeout, reverse: true });
+    },
+  },
+
+  {
+    name: 'Desktop.WaitForEnabled',
+    description: 'Wait until a UI element becomes interactive/enabled.',
+    params: ['locator', 'timeout'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const el = await session.findElement(String(params.locator));
+      const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
+      await el.waitForEnabled({ timeout });
+    },
+  },
+
+  // ── Assertions ─────────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.AssertVisible',
+    description: 'Assert a UI element is visible on screen.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const visible = await el.isDisplayed();
+      if (!visible) throw new Error(`Desktop.AssertVisible FAILED — element not visible: ${params.locator}`);
+    },
+  },
+
+  {
+    name: 'Desktop.AssertNotVisible',
+    description: 'Assert a UI element is not visible (may or may not exist in DOM).',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const session = getSession(context);
+      const driver = session.getDriver();
+      const el = await driver.$(session.parseSelector(String(params.locator)));
+      const exists = await el.isExisting();
+      if (exists) {
+        const visible = await el.isDisplayed();
+        if (visible) throw new Error(`Desktop.AssertNotVisible FAILED — element is visible: ${params.locator}`);
+      }
+    },
+  },
+
+  {
+    name: 'Desktop.AssertText',
+    description: 'Assert the text content of a UI element equals the expected value.',
+    params: ['locator', 'expected'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const text = await el.getText();
+      const expected = String(params.expected);
+      if (text !== expected) throw new Error(
+        `Desktop.AssertText FAILED — expected "${expected}" but got "${text}"`
+      );
+    },
+  },
+
+  {
+    name: 'Desktop.AssertContainsText',
+    description: 'Assert a UI element\'s text contains the expected substring.',
+    params: ['locator', 'expected'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const text = await el.getText();
+      const expected = String(params.expected);
+      if (!text.includes(expected)) throw new Error(
+        `Desktop.AssertContainsText FAILED — "${text}" does not contain "${expected}"`
+      );
+    },
+  },
+
+  {
+    name: 'Desktop.AssertEnabled',
+    description: 'Assert a UI element is enabled (interactable).',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const enabled = await el.isEnabled();
+      if (!enabled) throw new Error(`Desktop.AssertEnabled FAILED — element is disabled: ${params.locator}`);
+    },
+  },
+
+  {
+    name: 'Desktop.AssertDisabled',
+    description: 'Assert a UI element is disabled.',
+    params: ['locator'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const enabled = await el.isEnabled();
+      if (enabled) throw new Error(`Desktop.AssertDisabled FAILED — element is enabled: ${params.locator}`);
+    },
+  },
+
+  // ── Data capture ───────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.GetText',
+    description: 'Read the text of a UI element and store it in a variable.',
+    params: ['locator', 'variable'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const text = await el.getText();
+      context.variables[String(params.variable)] = text;
+      console.log(`[Desktop] ${params.variable} = "${text}"`);
+    },
+  },
+
+  {
+    name: 'Desktop.GetAttribute',
+    description: 'Read an attribute of a UI element and store it in a variable.',
+    params: ['locator', 'attribute', 'variable'],
+    execute: async (params, context) => {
+      const el = await getSession(context).findElement(String(params.locator));
+      const value = await el.getAttribute(String(params.attribute));
+      context.variables[String(params.variable)] = value;
+      console.log(`[Desktop] ${params.variable} = "${value}"`);
+    },
+  },
+
+  // ── Scrolling ──────────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.Scroll',
+    description: [
+      'Scroll within an element or the window.',
+      'direction: up | down (default) | left | right.',
+      'amount: pixels to scroll, default 300.',
+      'locator: optional — scroll into view of the element if provided.',
+    ].join(' '),
+    params: ['locator', 'direction', 'amount'],
+    execute: async (params, context) => {
+      const driver = getSession(context).getDriver();
+      const amount = Number(params.amount ?? 300);
+      const dir = String(params.direction ?? 'down');
+      const deltaX = dir === 'right' ? amount : dir === 'left' ? -amount : 0;
+      const deltaY = dir === 'up' ? -amount : amount;
+
+      if (params.locator) {
+        const el = await getSession(context).findElement(String(params.locator));
+        await (el as any).scrollIntoView();
+      }
+
+      await driver.performActions([{
+        type: 'wheel',
+        id: 'wheel1',
+        actions: [{ type: 'scroll', x: 0, y: 0, deltaX, deltaY, duration: 200 }],
+      }]);
+      await driver.releaseActions();
+    },
+  },
+
+  // ── Window management ──────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.Maximize',
+    description: 'Maximize the application window.',
+    params: [],
+    execute: async (_params, context) => {
+      await getSession(context).getDriver().maximizeWindow();
+    },
+  },
+
+  {
+    name: 'Desktop.Minimize',
+    description: 'Minimize the application window.',
+    params: [],
+    execute: async (_params, context) => {
+      await getSession(context).getDriver().minimizeWindow();
+    },
+  },
+
+  {
+    name: 'Desktop.SetWindowSize',
+    description: 'Resize the application window to specific dimensions.',
+    params: ['width', 'height'],
+    execute: async (params, context) => {
+      await getSession(context).getDriver().setWindowSize(
+        Number(params.width),
+        Number(params.height)
+      );
+    },
+  },
+
+  // ── Screenshot ─────────────────────────────────────────────────────────────
+
+  {
+    name: 'Desktop.TakeScreenshot',
+    description: 'Capture a screenshot of the application window and save it.',
+    params: ['name'],
+    execute: async (params, context) => {
+      const driver = getSession(context).getDriver();
+      const name = params.name ? String(params.name) : `desktop-screenshot-${Date.now()}`;
+      const base64 = await driver.takeScreenshot();
+      const outDir = context.artifacts.outputDir ?? 'artifacts';
+      fs.mkdirSync(outDir, { recursive: true });
+      const filePath = path.join(outDir, `${name}.png`);
+      fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+      context.artifacts.screenshots.push(filePath);
+      console.log(`[Desktop] Screenshot saved: ${filePath}`);
+    },
+  },
+
 ];
 
+// ── Exports ────────────────────────────────────────────────────────────────
+export { DesktopSession };
+
 export function registerDesktopKeywords(): void {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { KeywordRegistry } = require('@prabala/core') as typeof import('@prabala/core');
   KeywordRegistry.registerMany(desktopKeywords);
 }
+

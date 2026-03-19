@@ -17,7 +17,17 @@ const KEYWORD_CATEGORIES: Record<string, string[]> = {
   'Capture': ['GetText', 'GetValue', 'TakeScreenshot'],
   'Dialog': ['AcceptAlert', 'DismissAlert', 'SwitchToFrame'],
   'API': ['API.GET', 'API.POST', 'API.AssertStatus', 'API.AssertBody'],
-  'Desktop': ['Desktop.LaunchApp', 'Desktop.Click', 'Desktop.EnterText', 'Desktop.AssertVisible', 'Desktop.CloseApp'],
+  'Desktop': [
+    'Desktop.LaunchApp', 'Desktop.CloseApp',
+    'Desktop.Click', 'Desktop.DoubleClick', 'Desktop.RightClick', 'Desktop.Hover',
+    'Desktop.EnterText', 'Desktop.ClearText', 'Desktop.PressKey',
+    'Desktop.WaitForVisible', 'Desktop.WaitForHidden', 'Desktop.WaitForEnabled',
+    'Desktop.AssertVisible', 'Desktop.AssertNotVisible', 'Desktop.AssertText',
+    'Desktop.AssertContainsText', 'Desktop.AssertEnabled', 'Desktop.AssertDisabled',
+    'Desktop.GetText', 'Desktop.GetAttribute',
+    'Desktop.Scroll', 'Desktop.Maximize', 'Desktop.Minimize', 'Desktop.SetWindowSize',
+    'Desktop.TakeScreenshot',
+  ],
 }
 
 const KEYWORD_PARAMS: Record<string, string[]> = {
@@ -33,8 +43,19 @@ const KEYWORD_PARAMS: Record<string, string[]> = {
   'TakeScreenshot': ['name'], 'SwitchToFrame': ['name'], 'UploadFile': ['locator', 'filePath'],
   'API.GET': ['url', 'responseAs'], 'API.POST': ['url', 'body', 'responseAs'],
   'API.AssertStatus': ['expected'], 'API.AssertBody': ['path', 'expected'],
-  'Desktop.LaunchApp': ['appPath', 'platform'], 'Desktop.Click': ['locator'],
-  'Desktop.EnterText': ['locator', 'value'], 'Desktop.AssertVisible': ['locator'],
+  'Desktop.LaunchApp': ['appPath', 'platform', 'appiumUrl'],
+  'Desktop.Click': ['locator'], 'Desktop.DoubleClick': ['locator'],
+  'Desktop.RightClick': ['locator'], 'Desktop.Hover': ['locator'],
+  'Desktop.EnterText': ['locator', 'value'], 'Desktop.ClearText': ['locator'],
+  'Desktop.PressKey': ['key'],
+  'Desktop.WaitForVisible': ['locator', 'timeout'], 'Desktop.WaitForHidden': ['locator', 'timeout'],
+  'Desktop.WaitForEnabled': ['locator', 'timeout'],
+  'Desktop.AssertVisible': ['locator'], 'Desktop.AssertNotVisible': ['locator'],
+  'Desktop.AssertText': ['locator', 'expected'], 'Desktop.AssertContainsText': ['locator', 'expected'],
+  'Desktop.AssertEnabled': ['locator'], 'Desktop.AssertDisabled': ['locator'],
+  'Desktop.GetText': ['locator', 'variable'], 'Desktop.GetAttribute': ['locator', 'attribute', 'variable'],
+  'Desktop.Scroll': ['locator', 'direction', 'amount'],
+  'Desktop.SetWindowSize': ['width', 'height'], 'Desktop.TakeScreenshot': ['name'],
 }
 
 function newStep(keyword: string): TestStep {
