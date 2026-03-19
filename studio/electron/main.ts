@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execFile, spawn } from 'child_process';
-import OpenAI from 'openai';
+import { AzureOpenAI } from 'openai';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const RENDERER_URL = 'http://localhost:5173';
@@ -272,22 +272,83 @@ function registerIpcHandlers(): void {
     return true;
   });
 
+  ipcMain.handle('ai:getConfig', () => {
+    const cfg = readAiConfig();
+    return {
+      endpoint:   cfg.endpoint   ?? '',
+      apiKey:     cfg.apiKey     ?? '',
+      deployment: cfg.deployment ?? 'gpt-4o',
+      apiVersion: cfg.apiVersion ?? '2024-08-01-preview',
+    };
+  });
+
+  ipcMain.handle('ai:setConfig', (_e, cfg: Record<string, string>) => {
+    const existing = readAiConfig();
+    writeAiConfig({ ...existing, ...cfg });
+    return true;
+  });
+
+  ipcMain.handle('ai:testConnection', async () => {
+    const cfg = readAiConfig();
+    if (!cfg.apiKey)    return { ok: false, message: 'API Key is missing.' };
+    if (!cfg.endpoint)  return { ok: false, message: 'Endpoint URL is missing.' };
+    if (!cfg.deployment) return { ok: false, message: 'Deployment Name is missing.' };
+
+    try {
+      const client = new AzureOpenAI({
+        endpoint:   cfg.endpoint.trim(),
+        apiKey:     cfg.apiKey.trim(),
+        deployment: cfg.deployment.trim(),
+        apiVersion: (cfg.apiVersion || '2024-08-01-preview').trim(),
+      });
+      // Minimal non-streaming call to validate
+      await client.chat.completions.create({
+        model: cfg.deployment.trim(),
+        max_tokens: 5,
+        stream: false,
+        messages: [{ role: 'user', content: 'ping' }],
+      });
+      return { ok: true, message: 'Connection successful!' };
+    } catch (err: any) {
+      const status = err?.status ?? err?.code;
+      const body = err?.message ?? String(err);
+      if (status === 404) {
+        return { ok: false, message: `404 Not Found — check your Endpoint URL and Deployment Name.\nEndpoint: ${cfg.endpoint}\nDeployment: ${cfg.deployment}\n\nMake sure the deployment name exactly matches what is shown in Azure AI Foundry.` };
+      }
+      if (status === 401) {
+        return { ok: false, message: '401 Unauthorized — the API Key is incorrect or expired.' };
+      }
+      if (status === 403) {
+        return { ok: false, message: '403 Forbidden — this key does not have access to the resource.' };
+      }
+      return { ok: false, message: `Error ${status ?? ''}: ${body}` };
+    }
+  });
+
   // Active stream reference — allows abort
   let activeStream: { controller: AbortController } | null = null;
 
   ipcMain.handle('ai:chat',
     async (_e, messages: { role: 'user' | 'assistant'; content: string }[], systemPrompt: string) => {
-      const apiKey = readAiConfig().apiKey;
-      if (!apiKey) throw new Error('No API key configured. Go to AI Settings to add your OpenAI API key.');
+      const cfg = readAiConfig();
+      if (!cfg.apiKey)    throw new Error('No API key configured. Go to AI Settings to add your Azure OpenAI key.');
+      if (!cfg.endpoint)  throw new Error('No Azure endpoint configured. Go to AI Settings.');
+      if (!cfg.deployment) throw new Error('No deployment name configured. Go to AI Settings.');
 
-      const client = new OpenAI({ apiKey });
+      const client = new AzureOpenAI({
+        endpoint:   cfg.endpoint.trim(),
+        apiKey:     cfg.apiKey.trim(),
+        deployment: cfg.deployment.trim(),
+        apiVersion: (cfg.apiVersion || '2024-08-01-preview').trim(),
+      });
+
       const controller = new AbortController();
       activeStream = { controller };
       let fullText = '';
 
       try {
         const stream = await client.chat.completions.create({
-          model: 'gpt-4o',
+          model: cfg.deployment.trim(),
           max_tokens: 4096,
           stream: true,
           messages: [
@@ -304,7 +365,14 @@ function registerIpcHandlers(): void {
           }
         }
       } catch (err: any) {
-        if (err.name !== 'AbortError' && err.name !== 'APIUserAbortError') throw err;
+        if (err.name !== 'AbortError' && err.name !== 'APIUserAbortError') {
+          const status = err?.status ?? err?.code;
+          if (status === 404) {
+            throw new Error(`404 Not Found — Endpoint or Deployment name is wrong.\nEndpoint: ${cfg.endpoint}\nDeployment: ${cfg.deployment}\n\nGo to Azure AI Foundry → Deployments and copy the exact deployment name.`);
+          }
+          if (status === 401) throw new Error('401 Unauthorized — check your API Key in AI Settings.');
+          throw err;
+        }
       } finally {
         activeStream = null;
         mainWindow?.webContents.send('ai:done');

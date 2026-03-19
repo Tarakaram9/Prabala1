@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('prabala', {
   ai: {
     getKey: () => ipcRenderer.invoke('ai:getKey'),
     setKey: (key: string) => ipcRenderer.invoke('ai:setKey', key),
+    getConfig: () => ipcRenderer.invoke('ai:getConfig'),
+    setConfig: (cfg: Record<string, string>) => ipcRenderer.invoke('ai:setConfig', cfg),
+    testConnection: () => ipcRenderer.invoke('ai:testConnection'),
     chat: (
       messages: { role: 'user' | 'assistant'; content: string }[],
       systemPrompt: string
@@ -114,6 +117,9 @@ declare global {
       ai: {
         getKey(): Promise<string>;
         setKey(key: string): Promise<void>;
+        getConfig(): Promise<{ endpoint: string; apiKey: string; deployment: string; apiVersion: string }>;
+        setConfig(cfg: Record<string, string>): Promise<void>;
+        testConnection(): Promise<{ ok: boolean; message: string }>;
         chat(
           messages: { role: 'user' | 'assistant'; content: string }[],
           systemPrompt: string

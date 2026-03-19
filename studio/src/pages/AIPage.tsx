@@ -271,13 +271,15 @@ const MODES: { id: Mode; label: string; icon: React.ElementType; placeholder: st
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const ipc = (window as any).prabala
-  const [key, setKey] = useState('')
+  const [cfg, setCfg] = useState({ endpoint: '', apiKey: '', deployment: 'gpt-4o', apiVersion: '2024-08-01-preview' })
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   useEffect(() => {
     if (ipc?.ai) {
-      ipc.ai.getKey().then((k: string) => { setKey(k); setLoading(false) })
+      ipc.ai.getConfig().then((c: typeof cfg) => { setCfg(c); setLoading(false) })
     } else {
       setLoading(false)
     }
@@ -285,55 +287,126 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function handleSave() {
     if (!ipc?.ai) return
-    await ipc.ai.setKey(key.trim())
+    await ipc.ai.setConfig({
+      endpoint:   cfg.endpoint.trim(),
+      apiKey:     cfg.apiKey.trim(),
+      deployment: cfg.deployment.trim(),
+      apiVersion: cfg.apiVersion.trim(),
+    })
     setSaved(true)
     setTimeout(() => { setSaved(false); onClose() }, 1200)
   }
 
+  async function handleTest() {
+    if (!ipc?.ai) return
+    setTesting(true)
+    setTestResult(null)
+    // Save first so the handler reads the latest values
+    await ipc.ai.setConfig({
+      endpoint:   cfg.endpoint.trim(),
+      apiKey:     cfg.apiKey.trim(),
+      deployment: cfg.deployment.trim(),
+      apiVersion: cfg.apiVersion.trim(),
+    })
+    const result = await ipc.ai.testConnection()
+    setTestResult(result)
+    setTesting(false)
+  }
+
+  const canSave = !loading && !!cfg.endpoint.trim() && !!cfg.apiKey.trim() && !!cfg.deployment.trim()
+
+  const Field = ({ label, value, onChange, placeholder, secret, hint }: {
+    label: string; value: string; onChange: (v: string) => void
+    placeholder: string; secret?: boolean; hint?: string
+  }) => (
+    <div className="mb-3">
+      <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
+      <div className="relative">
+        <input
+          type={secret ? 'password' : 'text'}
+          value={loading ? '' : value}
+          onChange={e => { onChange(e.target.value); setTestResult(null) }}
+          placeholder={placeholder}
+          className="input w-full font-mono text-sm"
+          disabled={loading}
+        />
+        {loading && (
+          <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+        )}
+      </div>
+      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
+    </div>
+  )
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-surface-800 border border-surface-600 rounded-xl shadow-2xl w-[480px] p-6">
-        <div className="flex items-center justify-between mb-5">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-8">
+      <div className="bg-surface-800 border border-surface-600 rounded-xl shadow-2xl w-[540px] p-6">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Key size={18} className="text-brand-400" />
-            <h2 className="text-white font-semibold">AI Settings</h2>
+            <h2 className="text-white font-semibold">Azure OpenAI Settings</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors">
             <X size={16} />
           </button>
         </div>
 
-        <p className="text-sm text-slate-400 mb-4">
-          Enter your{' '}
-          <a className="text-brand-300 underline cursor-pointer"
-            onClick={() => (window as any).prabala?.shell.openPath('https://platform.openai.com/api-keys')}>
-            OpenAI API key
-          </a>{' '}
-          to enable GPT-4o-powered test generation and analysis. The key is stored locally in{' '}
-          <span className="font-mono text-xs bg-surface-700 px-1 py-0.5 rounded">~/.prabala/ai.json</span>.
-        </p>
-
-        <div className="relative mb-4">
-          <input
-            type="password"
-            value={loading ? '' : key}
-            onChange={e => setKey(e.target.value)}
-            placeholder="sk-proj-…"
-            className="input w-full font-mono text-sm pr-10"
-            disabled={loading}
-          />
-          {loading && (
-            <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
-          )}
+        <div className="bg-surface-700/40 border border-surface-600 rounded-lg p-3 mb-4 text-xs text-slate-400 space-y-1">
+          <p>Find all values in <strong className="text-slate-300">Azure Portal → Your OpenAI Resource → Keys and Endpoint</strong></p>
+          <p>Deployment name must exactly match what you see in <strong className="text-slate-300">Azure AI Foundry → Deployments</strong></p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <Field label="Endpoint URL" value={cfg.endpoint}
+          onChange={v => setCfg(p => ({ ...p, endpoint: v }))}
+          placeholder="https://YOUR-RESOURCE-NAME.openai.azure.com/"
+          hint="Must end with a slash. Example: https://my-openai.openai.azure.com/"
+        />
+        <Field label="API Key" value={cfg.apiKey}
+          onChange={v => setCfg(p => ({ ...p, apiKey: v }))}
+          placeholder="Paste key from Azure Portal → Keys and Endpoint" secret
+        />
+        <Field label="Deployment Name" value={cfg.deployment}
+          onChange={v => setCfg(p => ({ ...p, deployment: v }))}
+          placeholder="e.g. gpt-4o"
+          hint="Exact name from Azure AI Foundry → Deployments (case-sensitive)"
+        />
+        <Field label="API Version" value={cfg.apiVersion}
+          onChange={v => setCfg(p => ({ ...p, apiVersion: v }))}
+          placeholder="2024-08-01-preview"
+          hint="Use 2024-08-01-preview or 2024-12-01-preview for GPT-4o"
+        />
+
+        {/* Test result banner */}
+        {testResult && (
+          <div className={`rounded-lg border px-4 py-3 mb-4 text-sm ${
+            testResult.ok
+              ? 'bg-green-900/20 border-green-700/40 text-green-300'
+              : 'bg-red-900/20 border-red-700/40 text-red-300'
+          }`}>
+            <div className="flex items-start gap-2">
+              {testResult.ok
+                ? <Check size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                : <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />}
+              <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono">{testResult.message}</pre>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={handleTest}
+            disabled={!canSave || testing}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-brand-600/40 bg-brand-900/30 text-brand-300 hover:bg-brand-900/50 transition-colors disabled:opacity-40 disabled:cursor-default"
+          >
+            {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
           <button
             onClick={handleSave}
-            disabled={!key.trim() || loading}
+            disabled={!canSave}
             className="btn-primary flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-default"
           >
-            {saved ? <><Check size={14} /><span>Saved!</span></> : <><Key size={14} /><span>Save Key</span></>}
+            {saved ? <><Check size={14} /><span>Saved!</span></> : <><Key size={14} /><span>Save Config</span></>}
           </button>
           <button onClick={onClose} className="text-sm text-slate-400 hover:text-slate-200 px-3 py-2 rounded-lg hover:bg-surface-700 transition-colors">
             Cancel
@@ -355,7 +428,7 @@ function WelcomeScreen({ onSetKey }: { onSetKey: () => void }) {
       <div>
         <h1 className="text-2xl font-bold text-white mb-2">AI Co-Pilot</h1>
         <p className="text-slate-400 max-w-sm leading-relaxed">
-          Powered by GPT-4o. Generate tests from natural language, analyze failures, and explore your app automatically.
+          Powered by Azure OpenAI (GPT-4o). Generate tests from natural language, analyze failures, and explore your app automatically.
         </p>
       </div>
       <div className="grid grid-cols-3 gap-3 max-w-lg w-full">
@@ -376,7 +449,7 @@ function WelcomeScreen({ onSetKey }: { onSetKey: () => void }) {
         className="btn-primary flex items-center gap-2 px-6 py-3"
       >
         <Key size={16} />
-        Add OpenAI API Key to Get Started
+        Configure Azure OpenAI to Get Started
       </button>
     </div>
   )
@@ -402,11 +475,13 @@ export default function AIPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeMode = MODES.find(m => m.id === mode)!
 
-  // Check for API key on mount
+  // Check for Azure config on mount
   useEffect(() => {
-    if (ipc?.ai?.ai) {
-      ipc.ai.getKey()
-        .then((k: string) => setHasKey(!!k.trim()))
+    if (ipc?.ai) {
+      ipc.ai.getConfig()
+        .then((c: { endpoint: string; apiKey: string; deployment: string; apiVersion: string }) =>
+          setHasKey(!!(c.endpoint?.trim() && c.apiKey?.trim() && c.deployment?.trim()))
+        )
         .catch(() => setHasKey(false))
     } else {
       setHasKey(false)
@@ -509,7 +584,9 @@ export default function AIPage() {
       {showSettings && (
         <SettingsPanel onClose={() => {
           setShowSettings(false)
-          if (ipc?.ai) ipc.ai.getKey().then((k: string) => setHasKey(!!k.trim()))
+          if (ipc?.ai) ipc.ai.getConfig().then((c: any) =>
+            setHasKey(!!(c.endpoint?.trim() && c.apiKey?.trim() && c.deployment?.trim()))
+          )
         }} />
       )}
 
@@ -517,7 +594,7 @@ export default function AIPage() {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-600 flex-shrink-0">
         <Brain size={18} className="text-brand-400" />
         <span className="text-white font-semibold text-sm">AI Co-Pilot</span>
-        <span className="text-xs text-brand-300 bg-brand-900/40 px-2 py-0.5 rounded-full border border-brand-600/30 ml-1">GPT-4o</span>
+        <span className="text-xs text-brand-300 bg-brand-900/40 px-2 py-0.5 rounded-full border border-brand-600/30 ml-1">Azure GPT-4o</span>
 
         <div className="flex-1" />
 
@@ -587,7 +664,7 @@ export default function AIPage() {
               Mode: {mode}
             </span>
             <span className="text-xs bg-surface-700 border border-surface-600 px-2.5 py-1 rounded-full text-slate-300 font-mono">
-              Model: gpt-4o
+              Model: Azure GPT-4o
             </span>
           </div>
         </div>
