@@ -1,10 +1,10 @@
 import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
-  PlayCircle, BarChart3, FolderOpen, Sparkles, Brain
+  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User
 } from 'lucide-react'
-
 import { LucideIcon } from 'lucide-react'
+import WorkspaceMenu from './WorkspaceMenu'
 
 interface NavItem {
   id: Page
@@ -26,18 +26,9 @@ const navItems: NavItem[] = [
 export default function Sidebar() {
   const activePage = useAppStore((s) => s.activePage)
   const setActivePage = useAppStore((s) => s.setActivePage)
-  const projectDir = useAppStore((s) => s.projectDir)
-  const setProjectDir = useAppStore((s) => s.setProjectDir)
   const runStatus = useAppStore((s) => s.run.status)
-
-  async function handleOpenProject() {
-    const ipc = (window as any).prabala
-    if (!ipc) return
-    const dir = await ipc.dialog.openFolder()
-    if (dir) setProjectDir(dir)
-  }
-
-  const projectName = projectDir ? projectDir.split('/').pop() : 'No Project'
+  const currentUser = useAppStore((s) => s.currentUser)
+  const logout = useAppStore((s) => s.logout)
 
   return (
     <aside className="w-56 flex flex-col bg-surface-900 border-r border-surface-500 flex-shrink-0">
@@ -48,21 +39,15 @@ export default function Sidebar() {
             <Sparkles size={16} className="text-white" />
           </div>
           <div className="min-w-0">
-            <p className="text-white font-bold text-sm leading-tight">Prabala</p>
-            <p className="text-slate-500 text-xs">Studio v0.1</p>
+            <p className="text-white font-bold text-sm leading-tight">Prabala Studio</p>
+            <p className="text-slate-500 text-xs">v0.1</p>
           </div>
         </div>
       </div>
 
-      {/* Project selector */}
+      {/* Workspace selector */}
       <div className="px-3 py-2 border-b border-surface-500">
-        <button
-          onClick={handleOpenProject}
-          className="w-full flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-700 px-2 py-1.5 rounded-md transition-colors"
-        >
-          <FolderOpen size={13} />
-          <span className="truncate font-mono">{projectName}</span>
-        </button>
+        <WorkspaceMenu />
       </div>
 
       {/* Nav */}
@@ -97,11 +82,22 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-4 py-3 border-t border-surface-500">
-        <p className="text-xs text-slate-600 leading-relaxed">
-          Apache 2.0 &nbsp;·&nbsp; Open Source
-        </p>
+      {/* Footer — user info + logout */}
+      <div className="px-3 py-3 border-t border-surface-500">
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-800/60">
+          <div className="w-6 h-6 rounded-full bg-brand-600/40 flex items-center justify-center flex-shrink-0">
+            <User size={12} className="text-brand-300" />
+          </div>
+          <span className="text-xs text-slate-400 flex-1 truncate font-medium">{currentUser?.username ?? 'guest'}</span>
+          <button
+            onClick={logout}
+            title="Sign out"
+            className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-surface-600 transition-colors flex-shrink-0"
+          >
+            <LogOut size={12} />
+          </button>
+        </div>
+        <p className="text-xs text-slate-700 mt-2 px-1">Apache 2.0 · Open Source</p>
       </div>
     </aside>
   )

@@ -6,6 +6,22 @@ import { create } from 'zustand'
 
 export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai'
 
+// ── Auth ─────────────────────────────────────────────────────────────────────
+export interface AuthUser {
+  username: string
+}
+
+// Hardcoded users (extend later with a proper backend)
+const USERS: Record<string, string> = {
+  admin: 'admin123',
+}
+
+// ── Workspace ────────────────────────────────────────────────────────────────
+export interface Workspace {
+  name: string
+  path: string
+}
+
 export interface TestStep {
   id: string
   keyword: string
@@ -47,6 +63,18 @@ export interface RunResult {
 }
 
 interface AppState {
+  // Auth
+  currentUser: AuthUser | null
+  loginError: string | null
+  login: (username: string, password: string) => boolean
+  logout: () => void
+
+  // Workspace
+  workspace: Workspace | null
+  recentWorkspaces: Workspace[]
+  setWorkspace: (ws: Workspace) => void
+  clearWorkspace: () => void
+
   // Project
   projectDir: string | null
   setProjectDir: (dir: string) => void
@@ -90,6 +118,46 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
+  // Auth — restore from localStorage so session survives refresh
+  currentUser: (() => {
+    try { const u = localStorage.getItem('prabala_user'); return u ? JSON.parse(u) : null } catch { return null }
+  })(),
+  loginError: null,
+  login: (username, password) => {
+    if (USERS[username] && USERS[username] === password) {
+      const user: AuthUser = { username }
+      localStorage.setItem('prabala_user', JSON.stringify(user))
+      set({ currentUser: user, loginError: null })
+      return true
+    }
+    set({ loginError: 'Invalid username or password' })
+    return false
+  },
+  logout: () => {
+    localStorage.removeItem('prabala_user')
+    set({ currentUser: null, loginError: null })
+  },
+
+  // Workspace — restore from localStorage
+  workspace: (() => {
+    try { const w = localStorage.getItem('prabala_workspace'); return w ? JSON.parse(w) : null } catch { return null }
+  })(),
+  recentWorkspaces: (() => {
+    try { const r = localStorage.getItem('prabala_recent_ws'); return r ? JSON.parse(r) : [] } catch { return [] }
+  })(),
+  setWorkspace: (ws) => {
+    localStorage.setItem('prabala_workspace', JSON.stringify(ws))
+    set((s) => {
+      const recent = [ws, ...s.recentWorkspaces.filter(r => r.path !== ws.path)].slice(0, 8)
+      localStorage.setItem('prabala_recent_ws', JSON.stringify(recent))
+      return { workspace: ws, recentWorkspaces: recent, projectDir: ws.path }
+    })
+  },
+  clearWorkspace: () => {
+    localStorage.removeItem('prabala_workspace')
+    set({ workspace: null, projectDir: null })
+  },
+
   projectDir: '/Users/ram/prabala',
   setProjectDir: (dir) => set({ projectDir: dir }),
 

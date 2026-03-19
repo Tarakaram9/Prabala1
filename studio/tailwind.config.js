@@ -15,6 +15,7 @@ export default {
           700: '#6d28d9',
           800: '#5b21b6',
           900: '#4c1d95',
+          950: '#2e1065',
         },
         surface: {
           900: '#0f0f15',
@@ -24,6 +25,18 @@ export default {
           500: '#2a2a4a',
           400: '#363660',
         }
+      },
+      keyframes: {
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%':      { transform: 'translateX(-8px)' },
+          '40%':      { transform: 'translateX(8px)' },
+          '60%':      { transform: 'translateX(-6px)' },
+          '80%':      { transform: 'translateX(6px)' },
+        },
+      },
+      animation: {
+        shake: 'shake 0.4s ease-in-out',
       },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
