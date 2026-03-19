@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import {
-  Database, Plus, Trash2, Save, Edit2, X, FileJson, FileText, Copy, Check, FilePlus
+  Database, Plus, Trash2, Save, X, FileJson, FileText, Copy, Check, FilePlus
 } from 'lucide-react'
 
 interface DataFile {
@@ -16,7 +16,6 @@ export default function TestDataPage() {
   const [activeFile, setActiveFile] = useState<DataFile | null>(null)
   const [editedContent, setEditedContent] = useState<Record<string, unknown>>({})
   const [dirty, setDirty] = useState(false)
-  const [editingKey, setEditingKey] = useState<string | null>(null)
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
   const [addingNew, setAddingNew] = useState(false)
@@ -94,7 +93,6 @@ export default function TestDataPage() {
     setActiveFile(f)
     setEditedContent({ ...f.content })
     setDirty(false)
-    setEditingKey(null)
     setAddingNew(false)
   }
 
@@ -129,7 +127,14 @@ export default function TestDataPage() {
       const yaml = await import('js-yaml')
       text = yaml.dump(editedContent)
     }
-    if (ipc) await ipc.fs.writeFile(activeFile.path, text)
+    // Write to disk if in Electron; in demo mode just update in-memory state
+    if (ipc) {
+      try {
+        await ipc.fs.writeFile(activeFile.path, text)
+      } catch (err) {
+        console.error('Save failed:', err)
+      }
+    }
     const updated = { ...activeFile, content: { ...editedContent } }
     setFiles(prev => prev.map(f => f.path === activeFile.path ? updated : f))
     setActiveFile(updated)
@@ -233,7 +238,7 @@ export default function TestDataPage() {
             <button
               onClick={saveFile}
               disabled={!dirty}
-              className={`btn-primary flex items-center gap-2 py-2 text-xs ${!dirty ? 'opacity-40 cursor-default' : ''}`}
+              className={`btn-primary flex items-center gap-2 py-2 text-xs ${!dirty ? 'opacity-40 cursor-default pointer-events-none' : ''}`}
             >
               <Save size={13} /> Save
             </button>
@@ -262,22 +267,15 @@ export default function TestDataPage() {
               <tbody>
                 {Object.entries(editedContent).map(([key, val]) => (
                   <tr key={key} className="border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors group">
-                    <td className="py-2.5 pr-4">
+                    <td className="py-2 pr-4">
                       <span className="font-mono text-xs text-brand-300 bg-brand-900/30 px-2 py-0.5 rounded">{key}</span>
                     </td>
                     <td className="py-2 pr-4">
-                      {editingKey === key ? (
-                        <input
-                          autoFocus
-                          className="input text-xs w-full font-mono"
-                          value={String(val)}
-                          onChange={e => updateValue(key, e.target.value)}
-                          onBlur={() => setEditingKey(null)}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingKey(null) }}
-                        />
-                      ) : (
-                        <span className="text-slate-300 font-mono text-xs">{String(val)}</span>
-                      )}
+                      <input
+                        className="input text-xs w-full font-mono bg-transparent border-transparent hover:border-surface-500 focus:border-brand-500 focus:bg-surface-800 transition-colors"
+                        value={String(val)}
+                        onChange={e => updateValue(key, e.target.value)}
+                      />
                     </td>
                     <td className="py-2 pr-2 text-right">
                       <button
@@ -291,14 +289,9 @@ export default function TestDataPage() {
                       </button>
                     </td>
                     <td className="py-2">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => setEditingKey(key)} className="p-1 text-slate-600 hover:text-slate-300 transition-colors">
-                          <Edit2 size={12} />
-                        </button>
-                        <button onClick={() => deleteKey(key)} className="p-1 text-slate-600 hover:text-red-400 transition-colors">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                      <button onClick={() => deleteKey(key)} className="p-1 text-slate-600 hover:text-red-400 transition-colors">
+                        <Trash2 size={12} />
+                      </button>
                     </td>
                   </tr>
                 ))}
