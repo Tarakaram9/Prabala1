@@ -8,6 +8,13 @@
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "Start Prabala Studio",
+			"type": "shell",
+			"command": "cd /Users/ram/prabala/studio && npm run dev",
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

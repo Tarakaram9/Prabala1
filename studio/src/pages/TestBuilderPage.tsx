@@ -518,7 +518,7 @@ ${stepsYaml}\`\`\``
     })
   }
 
-  /** Replace (not append) the current test steps — used by Auto-Assist corrections */
+  /** Replace (not append) the current test steps — called when user clicks Apply Fix */
   function replaceStepsFromYaml(yamlText: string): number {
     if (!tc) return 0
     const parsed = parseYamlToSteps(yamlText)
@@ -533,6 +533,16 @@ ${stepsYaml}\`\`\``
     setExpandedSteps(new Set(newSteps.map(s => s.id)))
     setStepWarnings({}) // clear warnings — steps are now clean
     return newSteps.length
+  }
+
+  /** Called when user clicks 'Apply Fix' on an Auto-Assist YAML block */
+  function applyAIFix(msgId: string, yamlText: string) {
+    const applied = replaceStepsFromYaml(yamlText)
+    if (applied > 0) {
+      setAiMessages(prev => prev.map(m =>
+        m.id === msgId ? { ...m, autoApplied: true, autoAppliedCount: applied } : m
+      ))
+    }
   }
 
   function clearAiChat() {
@@ -640,19 +650,7 @@ steps:
       // Parse warnings from the response and annotate steps
       const freshTc = useAppStore.getState().activeTestCase
       if (freshTc) parseAndAnnotateWarnings(buffer, freshTc.steps)
-      // Auto-apply YAML steps if the response contains a corrected step list
-      const yamlMatch = buffer.match(/```(?:yaml|yml)\n([\s\S]*?)```/)
-      if (yamlMatch) {
-        const applied = replaceStepsFromYaml(yamlMatch[1])
-        if (applied > 0) {
-          setAiMessages(prev => prev.map(m =>
-            m.id === assistantId
-              ? { ...m, streaming: false, autoApplied: true, autoAppliedCount: applied }
-              : m
-          ))
-          return
-        }
-      }
+      // Mark message as done — user will Apply Fix manually if needed
       setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, streaming: false } : m))
     })
 
@@ -1150,15 +1148,30 @@ steps:
                           <div key={pi} className="rounded-lg border border-surface-500/60 overflow-hidden">
                             <div className="flex items-center justify-between px-3 py-1.5 bg-surface-700/60 border-b border-surface-500/40">
                               <span className="text-[10px] font-mono text-slate-500">yaml</span>
-                              {msg.auto && msg.autoApplied ? (
-                                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/50 text-emerald-400 text-[10px] font-semibold">
-                                  <CheckCircle2 size={10} />
-                                  Auto-applied · {msg.autoAppliedCount} step{(msg.autoAppliedCount ?? 0) !== 1 ? 's' : ''}
-                                </span>
+                              {msg.auto ? (
+                                // Auto-Assist message — Apply Fix replaces steps (user-controlled)
+                                msg.autoApplied ? (
+                                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/50 text-emerald-400 text-[10px] font-semibold">
+                                    <CheckCircle2 size={10} />
+                                    Applied · {msg.autoAppliedCount} step{(msg.autoAppliedCount ?? 0) !== 1 ? 's' : ''}
+                                  </span>
+                                ) : (
+                                  <button
+                                    disabled={!tc}
+                                    onClick={() => applyAIFix(msg.id, part.content)}
+                                    title="Replace current test steps with AI-corrected steps"
+                                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-700/40 hover:bg-amber-600/60 border border-amber-600/50 text-amber-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    <Wand2 size={10} />
+                                    Apply Fix
+                                  </button>
+                                )
                               ) : (
+                                // Manual message — Insert appends steps
                                 <button
                                   disabled={!tc}
                                   onClick={() => insertStepsFromYaml(part.content)}
+                                  title="Append these steps to the current test"
                                   className="flex items-center gap-1 px-2 py-0.5 rounded bg-brand-600/40 hover:bg-brand-600/70 border border-brand-500/50 text-brand-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   <Zap size={10} />
