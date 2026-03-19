@@ -21,6 +21,10 @@ interface AIChatMsg {
   auto?: boolean
   /** short label of what triggered this auto-analysis */
   trigger?: string
+  /** true = AI steps were auto-applied into the test builder */
+  autoApplied?: boolean
+  /** number of steps auto-applied */
+  autoAppliedCount?: number
 }
 
 function parseYamlToSteps(yamlText: string): Omit<TestStep, 'id'>[] | null {
@@ -514,6 +518,23 @@ ${stepsYaml}\`\`\``
     })
   }
 
+  /** Replace (not append) the current test steps — used by Auto-Assist corrections */
+  function replaceStepsFromYaml(yamlText: string): number {
+    if (!tc) return 0
+    const parsed = parseYamlToSteps(yamlText)
+    if (!parsed || parsed.length === 0) return 0
+    const newSteps: TestStep[] = parsed.map(s => ({
+      ...s,
+      id: crypto.randomUUID(),
+      params: s.params as Record<string, string>,
+    }))
+    updateTestCase(tc.id, { steps: newSteps })
+    // expand all replaced steps
+    setExpandedSteps(new Set(newSteps.map(s => s.id)))
+    setStepWarnings({}) // clear warnings — steps are now clean
+    return newSteps.length
+  }
+
   function clearAiChat() {
     setAiMessages([])
     setStepWarnings({})
@@ -615,10 +636,24 @@ steps:
     ipc.ai.onDone(() => {
       aiStreamingRef.current = false
       setAiStreaming(false)
-      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, streaming: false } : m))
       ipc.ai.removeListeners?.()
       // Parse warnings from the response and annotate steps
-      parseAndAnnotateWarnings(buffer, currentTc.steps)
+      const freshTc = useAppStore.getState().activeTestCase
+      if (freshTc) parseAndAnnotateWarnings(buffer, freshTc.steps)
+      // Auto-apply YAML steps if the response contains a corrected step list
+      const yamlMatch = buffer.match(/```(?:yaml|yml)\n([\s\S]*?)```/)
+      if (yamlMatch) {
+        const applied = replaceStepsFromYaml(yamlMatch[1])
+        if (applied > 0) {
+          setAiMessages(prev => prev.map(m =>
+            m.id === assistantId
+              ? { ...m, streaming: false, autoApplied: true, autoAppliedCount: applied }
+              : m
+          ))
+          return
+        }
+      }
+      setAiMessages(prev => prev.map(m => m.id === assistantId ? { ...m, streaming: false } : m))
     })
 
     try {
@@ -1115,14 +1150,21 @@ steps:
                           <div key={pi} className="rounded-lg border border-surface-500/60 overflow-hidden">
                             <div className="flex items-center justify-between px-3 py-1.5 bg-surface-700/60 border-b border-surface-500/40">
                               <span className="text-[10px] font-mono text-slate-500">yaml</span>
-                              <button
-                                disabled={!tc}
-                                onClick={() => insertStepsFromYaml(part.content)}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-brand-600/40 hover:bg-brand-600/70 border border-brand-500/50 text-brand-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                <Zap size={10} />
-                                Insert into Test
-                              </button>
+                              {msg.auto && msg.autoApplied ? (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/50 text-emerald-400 text-[10px] font-semibold">
+                                  <CheckCircle2 size={10} />
+                                  Auto-applied · {msg.autoAppliedCount} step{(msg.autoAppliedCount ?? 0) !== 1 ? 's' : ''}
+                                </span>
+                              ) : (
+                                <button
+                                  disabled={!tc}
+                                  onClick={() => insertStepsFromYaml(part.content)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-brand-600/40 hover:bg-brand-600/70 border border-brand-500/50 text-brand-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  <Zap size={10} />
+                                  Insert into Test
+                                </button>
+                              )}
                             </div>
                             <pre className="text-[11px] text-slate-300 font-mono px-3 py-2 overflow-x-auto bg-surface-800/60">
                               {part.content.trimEnd()}
