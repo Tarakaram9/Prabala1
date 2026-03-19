@@ -8,7 +8,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Brain, Send, Settings, Key, Copy, Check, Save,
   Trash2, RotateCcw, ChevronDown, ChevronUp, Loader2,
-  Sparkles, AlertTriangle, Search, FlaskConical, X,
+  AlertTriangle, Search, FlaskConical, X,
   Terminal, FileCode2,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
@@ -276,7 +276,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (ipc) {
+    if (ipc?.ai) {
       ipc.ai.getKey().then((k: string) => { setKey(k); setLoading(false) })
     } else {
       setLoading(false)
@@ -284,7 +284,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [])
 
   async function handleSave() {
-    if (!ipc) return
+    if (!ipc?.ai) return
     await ipc.ai.setKey(key.trim())
     setSaved(true)
     setTimeout(() => { setSaved(false); onClose() }, 1200)
@@ -404,8 +404,10 @@ export default function AIPage() {
 
   // Check for API key on mount
   useEffect(() => {
-    if (ipc) {
-      ipc.ai.getKey().then((k: string) => setHasKey(!!k.trim()))
+    if (ipc?.ai?.ai) {
+      ipc.ai.getKey()
+        .then((k: string) => setHasKey(!!k.trim()))
+        .catch(() => setHasKey(false))
     } else {
       setHasKey(false)
     }
@@ -418,7 +420,7 @@ export default function AIPage() {
 
   // Register chunk listener
   useEffect(() => {
-    if (!ipc) return
+    if (!ipc?.ai) return
     ipc.ai.onChunk((token: string) => {
       setMessages(prev => {
         const last = prev[prev.length - 1]
@@ -439,7 +441,7 @@ export default function AIPage() {
 
   const handleSend = useCallback(async () => {
     const text = input.trim()
-    if (!text || isStreaming || !ipc) return
+    if (!text || isStreaming || !ipc?.ai) return
 
     setError(null)
     setInput('')
@@ -479,7 +481,7 @@ export default function AIPage() {
   }, [input, isStreaming, messages, mode, keywords, projectDir, ipc])
 
   async function handleAbort() {
-    if (ipc) await ipc.ai.abort()
+    if (ipc?.ai) await ipc.ai.abort()
     setMessages(prev =>
       prev.map((m, i) => i === prev.length - 1 ? { ...m, streaming: false } : m)
     )
@@ -507,7 +509,7 @@ export default function AIPage() {
       {showSettings && (
         <SettingsPanel onClose={() => {
           setShowSettings(false)
-          if (ipc) ipc.ai.getKey().then((k: string) => setHasKey(!!k.trim()))
+          if (ipc?.ai) ipc.ai.getKey().then((k: string) => setHasKey(!!k.trim()))
         }} />
       )}
 
