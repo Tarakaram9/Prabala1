@@ -1,0 +1,9 @@
+{
+  "sapClient":   "100",
+  "sapUser":     "TESTUSER",
+  "sapPass":     "Test@123",
+  "salesOrg":   "1000",
+  "soldToParty": "10000001",
+  "material":    "MAT-001",
+  "quantity":    "10"
+}

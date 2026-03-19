@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prabala SAP GUI Example Test – Sales Order Creation (VA01)
+#
+# Pre-requisites (Windows only):
+#   1. SAP GUI 7.x installed and scripting enabled
+#   2. SAP Logon connection to your system configured
+#   3. npm install -g winax
+#
+# Run:
+#   prabala run "tests/sap-*.yaml" --config prabala.config.yaml
+#
+# Use the test-data file for credentials:
+#   test-data/sap-data.json  →  { "sapUser": "TESTUSER", "sapPass": "Test@123", ... }
+# ─────────────────────────────────────────────────────────────────────────────
+
+testCase: "SAP – Create Sales Order VA01"
+description: "End-to-end test for creating a standard sales order in SAP ECC/S4HANA"
+tags: [sap, sales, regression, va01]
+dataFile: "test-data/sap-data.json"
+
+steps:
+
+  # ── 1. Connect to already-open SAP session ──────────────────────────────
+  - keyword: SAP.Connect
+    description: "Attach to the first available open SAP session"
+    params:
+      system: ""         # leave blank to use first open session
+                         # or set to SAP Logon entry name: "ECC Dev"
+
+  # ── 2. Login (skip if session is already logged in) ────────────────────
+  - keyword: SAP.Login
+    description: "Enter credentials on SAP logon screen"
+    params:
+      client:   "{{TEST_DATA.sapClient}}"
+      username: "{{TEST_DATA.sapUser}}"
+      password: "{{TEST_DATA.sapPass}}"
+      language: "EN"
+
+  # ── 3. Navigate to VA01 – Create Sales Order ───────────────────────────
+  - keyword: SAP.RunTCode
+    description: "Open Create Sales Order transaction"
+    params:
+      tcode: "VA01"
+
+  # ── 4. Select order type OR4 (Standard) ───────────────────────────────
+  - keyword: SAP.SetText
+    description: "Set order type to 'OR' (Standard Order)"
+    params:
+      fieldId: "wnd[0]/usr/ctxtVBAK-AUART"
+      value:   "OR"
+
+  # ── 5. Set sales organisation ─────────────────────────────────────────
+  - keyword: SAP.SetText
+    description: "Enter Sales Organisation"
+    params:
+      fieldId: "wnd[0]/usr/ctxtVBAK-VKORG"
+      value:   "{{TEST_DATA.salesOrg}}"
+
+  # ── 6. Press Enter to proceed to order header ─────────────────────────
+  - keyword: SAP.PressKey
+    description: "Confirm header selections"
+    params:
+      key: "Enter"
+
+  # ── 7. Fill in Sold-to-Party ───────────────────────────────────────────
+  - keyword: SAP.SetText
+    description: "Enter Sold-to-Party customer number"
+    params:
+      fieldId: "wnd[0]/usr/subSUBSCREEN_HEADER:SAPMV45A:4021/txtKUNAG-VBELN"
+      value:   "{{TEST_DATA.soldToParty}}"
+
+  # ── 8. Set PO number ───────────────────────────────────────────────────
+  - keyword: SAP.SetText
+    description: "Enter customer Purchase Order number"
+    params:
+      fieldId: "wnd[0]/usr/subSUBSCREEN_HEADER:SAPMV45A:4021/txtBSTK-VBELN"
+      value:   "PO-PRABALA-001"
+
+  # ── 9. Navigate to Items tab ───────────────────────────────────────────
+  - keyword: SAP.SelectTab
+    description: "Switch to the Sales Items overview tab"
+    params:
+      tabId: "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
+
+  # ── 10. Enter first line item – Material ──────────────────────────────
+  - keyword: SAP.SetText
+    description: "Set material number for first order line item"
+    params:
+      fieldId: "wnd[0]/usr/subSUBSCREEN_BODY:SAPMV45A:4400/subSUBSCREEN_TC:SAPMV45A:4900/tblSAPMV45ATCTRL_U_ERF_AUFTRAG/ctxtRV45A-MABNR[1,0]"
+      value:   "{{TEST_DATA.material}}"
+
+  # ── 11. Enter order quantity ───────────────────────────────────────────
+  - keyword: SAP.SetText
+    description: "Set quantity for first line item"
+    params:
+      fieldId: "wnd[0]/usr/subSUBSCREEN_BODY:SAPMV45A:4400/subSUBSCREEN_TC:SAPMV45A:4900/tblSAPMV45ATCTRL_U_ERF_AUFTRAG/txtRV45A-KWMENG[2,0]"
+      value:   "{{TEST_DATA.quantity}}"
+
+  # ── 12. Press Enter to trigger pricing ────────────────────────────────
+  - keyword: SAP.PressKey
+    params:
+      key: "Enter"
+
+  # ── 13. Take a screenshot before saving ───────────────────────────────
+  - keyword: SAP.TakeScreenshot
+    description: "Capture screen before saving"
+    params:
+      name: "va01-before-save"
+
+  # ── 14. Save the order (F8 / Ctrl+S button) ───────────────────────────
+  - keyword: SAP.PressKey
+    description: "Save the sales order"
+    params:
+      key: "F8"
+
+  # ── 15. Assert success message in status bar ──────────────────────────
+  - keyword: SAP.AssertStatusBar
+    description: "Verify the sales order was created successfully"
+    params:
+      expected: "saved"   # Status bar shows "Standard Order XXXXXXXX saved"
+      type: "S"           # S = Success (green)
+
+  # ── 16. Read the created order number ─────────────────────────────────
+  - keyword: SAP.GetStatusBar
+    description: "Store the new order number from the status bar"
+    params:
+      variable: "CREATED_ORDER_NUMBER"
+
+  # ── 17. Navigate back ─────────────────────────────────────────────────
+  - keyword: SAP.PressKey
+    params:
+      key: "F3"
+
+  # ── 18. Logout ────────────────────────────────────────────────────────
+  - keyword: SAP.Logout
+
+  # ── 19. Disconnect ────────────────────────────────────────────────────
+  - keyword: SAP.Disconnect

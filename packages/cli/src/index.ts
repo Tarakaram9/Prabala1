@@ -18,6 +18,17 @@ import { HtmlReporter } from '@prabala/reporting';
 // Register all built-in keyword libraries
 registerWebKeywords();
 
+// SAP GUI keywords — only register on Windows, skip gracefully elsewhere
+if (process.platform === 'win32') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { registerSapKeywords } = require('@prabala/driver-sap');
+    registerSapKeywords();
+  } catch {
+    // driver-sap not built yet or winax missing — no-op
+  }
+}
+
 const program = new Command();
 
 program

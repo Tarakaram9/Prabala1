@@ -61,6 +61,19 @@ const KEYWORD_CATEGORIES: Record<string, string[]> = {
     'Desktop.Scroll', 'Desktop.Maximize', 'Desktop.Minimize', 'Desktop.SetWindowSize',
     'Desktop.TakeScreenshot',
   ],
+  'SAP GUI': [
+    'SAP.Connect', 'SAP.Disconnect',
+    'SAP.Login', 'SAP.Logout',
+    'SAP.RunTCode',
+    'SAP.SetText', 'SAP.GetText',
+    'SAP.PressButton', 'SAP.PressKey',
+    'SAP.SelectMenu',
+    'SAP.SelectComboBox', 'SAP.SetCheckbox', 'SAP.SelectTab',
+    'SAP.GetTableCell', 'SAP.DoubleClickTableRow',
+    'SAP.AssertText', 'SAP.AssertContainsText', 'SAP.AssertExists',
+    'SAP.AssertStatusBar', 'SAP.GetStatusBar',
+    'SAP.TakeScreenshot',
+  ],
 }
 
 const KEYWORD_PARAMS: Record<string, string[]> = {
@@ -89,6 +102,28 @@ const KEYWORD_PARAMS: Record<string, string[]> = {
   'Desktop.GetText': ['locator', 'variable'], 'Desktop.GetAttribute': ['locator', 'attribute', 'variable'],
   'Desktop.Scroll': ['locator', 'direction', 'amount'],
   'Desktop.SetWindowSize': ['width', 'height'], 'Desktop.TakeScreenshot': ['name'],
+  // SAP GUI
+  'SAP.Connect':            ['system', 'sessionIndex'],
+  'SAP.Disconnect':         [],
+  'SAP.Login':              ['client', 'username', 'password', 'language'],
+  'SAP.Logout':             [],
+  'SAP.RunTCode':           ['tcode'],
+  'SAP.SetText':            ['fieldId', 'value'],
+  'SAP.GetText':            ['fieldId', 'variable'],
+  'SAP.PressButton':        ['buttonId'],
+  'SAP.PressKey':           ['key', 'window'],
+  'SAP.SelectMenu':         ['menuId'],
+  'SAP.SelectComboBox':     ['fieldId', 'key'],
+  'SAP.SetCheckbox':        ['fieldId', 'checked'],
+  'SAP.SelectTab':          ['tabId'],
+  'SAP.GetTableCell':       ['tableId', 'row', 'column', 'variable'],
+  'SAP.DoubleClickTableRow':['tableId', 'row', 'column'],
+  'SAP.AssertText':         ['fieldId', 'expected'],
+  'SAP.AssertContainsText': ['fieldId', 'expected'],
+  'SAP.AssertExists':       ['fieldId'],
+  'SAP.AssertStatusBar':    ['expected', 'type'],
+  'SAP.GetStatusBar':       ['variable'],
+  'SAP.TakeScreenshot':     ['name'],
 }
 
 function newStep(keyword: string): TestStep {
@@ -332,28 +367,40 @@ export default function TestBuilderPage() {
     return `You are an expert Prabala test-automation AI assistant embedded directly inside the Test Builder.
 The user is building a test case step-by-step. Your job is to help them add, fix, and improve test steps.
 
-## Available Keywords
-${allKws.map(k => `- ${k}`).join('\n')}
+## Available Keywords by category
+${Object.entries(KEYWORD_CATEGORIES).map(([cat, kws]) => `### ${cat}\n${kws.join(', ')}`).join('\n\n')}
+
+## SAP.* Keyword Notes
+- Field IDs follow the SAP GUI component path format: wnd[0]/usr/txtFIELD-NAME
+- SAP.PressKey values: Enter | F1..F24 | Back | Save | Cancel | PageUp | PageDown
+- SAP.AssertStatusBar type: S=Success E=Error W=Warning I=Info A=Abort
+- Use SAP.Connect first, then SAP.Login, then SAP.RunTCode to navigate
+- Use {{TEST_DATA.sapPass}} for passwords — never hardcode credentials
 
 ## Prabala YAML Step Format
 When you output steps, wrap them in a YAML code block like this:
 \`\`\`yaml
 steps:
-  - keyword: NavigateTo
+  - keyword: SAP.Connect
     params:
-      url: "https://example.com"
-  - keyword: Click
+      system: "ECC Dev"
+  - keyword: SAP.Login
     params:
-      locator: "#loginBtn"
+      client: "100"
+      username: "{{TEST_DATA.sapUser}}"
+      password: "{{TEST_DATA.sapPass}}"
+  - keyword: SAP.RunTCode
+    params:
+      tcode: "VA01"
 \`\`\`
 
 The user can click "Insert into Test" to inject those steps directly into their test.
 
 ## Rules
 - Output ONLY the steps array inside the yaml block (not the full test file) unless the user asks for a full file
-- Use correct keyword names from the list above
+- Use correct keyword names from the list above — SAP.* keywords are cyan in the step editor
 - Use 2-space YAML indentation
-- For locators use CSS selectors (#id, .class) or XPath (//tag[@attr='val'])
+- For web locators use CSS selectors (#id, .class) or XPath (//tag[@attr='val'])
 - Be concise — show the YAML then a brief 1-2 sentence explanation
 - If the user pastes a failure log, analyse it and suggest the fixed YAML steps
 `
@@ -462,6 +509,7 @@ ${stepsYaml}\`\`\``
     if (kw.startsWith('Desktop.')) return 'border-l-orange-500'
     if (kw.startsWith('API.')) return 'border-l-green-500'
     if (kw.startsWith('Wait')) return 'border-l-purple-500'
+    if (kw.startsWith('SAP.')) return 'border-l-cyan-500'
     return 'border-l-brand-500'
   }
 
