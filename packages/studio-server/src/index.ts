@@ -284,7 +284,13 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
           if (obj.__done) {
             broadcast('spy:done', null)
           } else {
+            // Broadcast the locator to all WS clients
             broadcast('spy:locator', obj)  // { locator, tag, text }
+            // NOW kill the spy process — stdout is already written/flushed
+            // so there is no race between emit() and process exit
+            setTimeout(() => {
+              if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+            }, 300)
           }
         } catch { /* ignore malformed */ }
       }

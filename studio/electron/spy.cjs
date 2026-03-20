@@ -180,9 +180,26 @@ async function run() {
   const context = await browser.newContext({ viewport: null });
 
   // Expose bridge: page JS → stdout
+  // NOTE: Do NOT close the browser here — the server kills the process via SIGTERM
+  // after receiving the locator, ensuring stdout is fully flushed first.
   await context.exposeFunction('__prabalaSendLocator', (locator, tag, text) => {
     emit({ locator, tag, text });
-    browser.close().catch(() => {});
+    // Show a green confirmation overlay so user knows the pick was captured
+    page.evaluate(`
+      (function() {
+        const prev = document.getElementById('__prabala_spy_overlay');
+        if (prev) prev.style.border = '2.5px solid #22c55e';
+        const banner = document.getElementById('__prabala_spy_banner');
+        if (banner) {
+          banner.style.background = '#14532d';
+          banner.style.borderColor = '#22c55e';
+          banner.style.color = '#bbf7d0';
+          banner.textContent = '✅ Locator captured — you can close this window';
+        }
+        const tt = document.getElementById('__prabala_spy_tooltip');
+        if (tt) tt.style.display = 'none';
+      })()
+    `).catch(() => {});
   });
 
   // Inject locator strategy + spy UI into every page/frame
