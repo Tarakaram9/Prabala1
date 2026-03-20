@@ -142,27 +142,31 @@ const SPY_SCRIPT = `
       + 'width:' + rect.width + 'px!important;height:' + rect.height + 'px!important;';
 
     const loc = window.__prabalaGetLocator(el) || el.tagName.toLowerCase();
-    tooltip.textContent = loc + '\\n' + el.tagName.toLowerCase() + (el.id ? '#' + el.id : '');
-    tooltip.style.display = 'block';
+    tooltip.textContent = loc + '\\n<' + el.tagName.toLowerCase() + '>';
     let tx = e.clientX + 14, ty = e.clientY + 14;
     if (tx + 390 > window.innerWidth) tx = e.clientX - 395;
     if (ty + 80 > window.innerHeight) ty = e.clientY - 65;
-    tooltip.style.cssText += 'position:fixed!important;z-index:2147483648!important;pointer-events:none!important;'
+    // Full cssText assignment (never +=) so display:none is never accidentally preserved
+    tooltip.style.cssText = 'position:fixed!important;z-index:2147483648!important;pointer-events:none!important;'
       + 'background:#1e1b4b!important;color:#c4b5fd!important;'
       + 'font:12px/1.4 monospace!important;padding:5px 9px!important;'
       + 'border-radius:5px!important;border:1px solid #4c1d95!important;'
       + 'max-width:380px!important;word-break:break-all!important;white-space:pre-wrap!important;'
-      + 'top:' + ty + 'px!important;left:' + tx + 'px!important;';
+      + 'display:block!important;top:' + ty + 'px!important;left:' + tx + 'px!important;';
   }, true);
 
   document.addEventListener('click', function(e) {
-    if (!current || current === overlay || current === tooltip || current === banner) return;
+    // Use elementFromPoint for reliability — not stale 'current' variable
+    const el = document.elementFromPoint(e.clientX, e.clientY) || e.target;
+    if (!el || el === overlay || el === tooltip || el === banner) return;
     e.preventDefault();
-    e.stopPropagation();
-    const loc = window.__prabalaGetLocator(current) || current.tagName.toLowerCase();
-    const tag = current.tagName.toLowerCase();
-    const text = (current.innerText || current.textContent || '').trim().replace(/\\s+/g,' ').slice(0, 80);
-    window.__prabalaSendLocator(loc, tag, text);
+    e.stopImmediatePropagation();
+    const loc = window.__prabalaGetLocator(el) || el.tagName.toLowerCase();
+    const tag = el.tagName.toLowerCase();
+    const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0, 80);
+    if (typeof window.__prabalaSendLocator === 'function') {
+      window.__prabalaSendLocator(loc, tag, text);
+    }
   }, true);
 })();
 `;
