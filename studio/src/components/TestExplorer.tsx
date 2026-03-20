@@ -10,6 +10,7 @@ import {
   RefreshCw, Loader2, ChevronRight, ChevronDown,
   CheckSquare, Square as SquareIcon, Minus, GripVertical, MoveRight,
 } from 'lucide-react'
+import api from '../lib/api'
 
 // ── Folder tree data structure ────────────────────────────────────────────────
 export interface FolderNode {
@@ -96,7 +97,7 @@ type TestExplorerProps = BuilderProps | MonitorProps
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TestExplorer(props: TestExplorerProps) {
   const { projectDir, testCases, onRescan, rescanning } = props
-  const ipc = (window as any).prabala
+  const ipc = api
 
   const testsRoot = `${projectDir}/tests`
   const tree = buildTree(testCases, testsRoot)

@@ -10,6 +10,11 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "build:packages": "npm run build -w packages/core && npm run build -w packages/reporting && npm run build -w packages/cli",
+    "build:server": "npm run build -w packages/studio-server",
+    "build:web": "npm run build -w packages/studio-server && npm run build:web -w studio",
+    "start:server": "node packages/studio-server/dist/index.js",
+    "dev:server": "npx ts-node packages/studio-server/src/index.ts",
+    "dev:studio": "concurrently \"npm run dev:server\" \"npm run dev:web -w studio\"",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint packages/*/src/**/*.ts",
     "prabala": "node packages/cli/dist/index.js"

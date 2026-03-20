@@ -7,6 +7,7 @@ import {
   CheckSquare, Square as SquareIcon, Minus
 } from 'lucide-react'
 import TestExplorer from '../components/TestExplorer'
+import api from '../lib/api'
 
 export default function ExecutionMonitorPage() {
   const { run, setRunStatus, appendLog, clearLogs, setExitCode, projectDir, testCases } = useAppStore()
@@ -75,7 +76,7 @@ export default function ExecutionMonitorPage() {
 
   // ── Start run ──────────────────────────────────────────────────────────────
   async function startRun() {
-    const ipc = (window as any).prabala
+    const ipc = api
     clearLogs()
     setRunStatus('running')
 
@@ -120,7 +121,7 @@ export default function ExecutionMonitorPage() {
   }
 
   function stopRun() {
-    const ipc = (window as any).prabala
+    const ipc = api
     ipc?.runner.stop()
     ipc?.runner.removeAllListeners()
     setRunStatus('idle')

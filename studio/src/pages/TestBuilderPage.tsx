@@ -9,6 +9,7 @@ import {
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
 import { loadProjectData } from '../utils/projectLoader'
+import api from '../lib/api'
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
 
@@ -203,7 +204,7 @@ export default function TestBuilderPage() {
   // Load test data variable names from test-data/ files whenever projectDir changes
   useEffect(() => {
     async function loadTestDataVars() {
-      const ipc = (window as any).prabala
+      const ipc = api
       if (!ipc || !projectDir) return
       try {
         const dirPath = `${projectDir}/test-data`
@@ -285,7 +286,7 @@ export default function TestBuilderPage() {
 
   // ─ Recording ──────────────────────────────────────────────────────────────
   function startRecording() {
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!tc) return
     setRecordedCount(0)
     setIsRecording(true)
@@ -324,7 +325,7 @@ export default function TestBuilderPage() {
   }
 
   function stopRecording() {
-    const ipc = (window as any).prabala
+    const ipc = api
     ipc?.recorder.stop()
     ipc?.recorder.removeAllListeners()
     setIsRecording(false)
@@ -426,7 +427,7 @@ export default function TestBuilderPage() {
       })),
     }, { lineWidth: 120, noRefs: true })
 
-    const ipc = (window as any).prabala
+    const ipc = api
 
     if (!ipc) {
       // Demo / browser mode — no write but simulate success
@@ -454,7 +455,7 @@ export default function TestBuilderPage() {
 
   // ─ AI Co-Pilot ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc?.ai) { setAiConfigured(false); return }
     ipc.ai.getConfig().then((cfg: any) => {
       setAiConfigured(!!(cfg?.apiKey && cfg?.endpoint && cfg?.deployment))
@@ -525,7 +526,7 @@ ${stepsYaml}\`\`\``
   async function sendAIMessage() {
     const text = aiInput.trim()
     if (!text || aiStreaming) return
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc?.ai) return
 
     const userMsg: AIChatMsg = { id: crypto.randomUUID(), role: 'user', content: text }
@@ -618,7 +619,7 @@ ${stepsYaml}\`\`\``
   }
 
   function ipc_ai_abort() {
-    const ipc = (window as any).prabala
+    const ipc = api
     ipc?.ai?.abort().catch(() => {})
     ipc?.ai?.removeListeners?.()
     setAiStreaming(false)
@@ -679,7 +680,7 @@ steps:
   }
 
   async function sendAIAutoAnalysis(trigger: string) {
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc?.ai) return
 
     // Get fresh steps from store (avoids stale closure)

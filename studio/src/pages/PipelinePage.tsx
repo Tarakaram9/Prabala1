@@ -9,6 +9,7 @@ import {
   Github, Container, Server, Triangle, ChevronRight,
 } from 'lucide-react'
 import { useAppStore, PipelineSettings } from '../store/appStore'
+import api from '../lib/api'
 
 // ── Platform descriptors ──────────────────────────────────────────────────────
 
@@ -387,7 +388,7 @@ export default function PipelinePage() {
     setSaveError(null)
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ipc = (window as any).electron?.ipc as any
+      const ipc = api
       if (!ipc) { setSaveError('IPC not available in browser preview'); return }
 
       for (const p of PLATFORMS) {

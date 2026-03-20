@@ -6,6 +6,7 @@ import { useState, useCallback } from 'react'
 import { useAppStore, ObjectEntry, LocatorFallback, PageDef } from '../store/appStore'
 import { Search, Plus, Trash2, Save, Database, Edit3, Globe, Layout, Zap, X, ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react'
 import yaml from 'js-yaml'
+import api from '../lib/api'
 
 const STRATEGIES = ['css', 'xpath', 'text', 'aria', 'id', 'label', 'placeholder', 'testId', 'automationId', 'name', 'role']
 
@@ -85,7 +86,7 @@ function ObjectsTab() {
 
   async function saveToFile(objs: ObjectEntry[]) {
     if (!projectDir) return
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc) return
     const byPage: Record<string, Record<string, any>> = {}
     for (const obj of objs) {
@@ -417,7 +418,7 @@ function PagesTab() {
 
   async function saveToFile(defs: PageDef[]) {
     if (!projectDir) return
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc) return
     const content = yaml.dump({ pages: defs }, { lineWidth: 120 })
     await ipc.fs.writeFile(`${projectDir}/object-repository/pages.yaml`, content)

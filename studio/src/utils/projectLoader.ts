@@ -4,11 +4,12 @@
 
 import yaml from 'js-yaml'
 import { useAppStore, TestCase, TestStep, ObjectEntry, PageDef, ComponentDef, ComponentStep } from '../store/appStore'
+import api from '../lib/api'
 
-const ipc = (window as any).prabala
+const ipc = api
 
 function isElectron(): boolean {
-  return typeof (window as any).prabala !== 'undefined'
+  return true // api layer always available (Electron or web server)
 }
 
 // ── Load all test cases from tests/ ─────────────────────────────────────────

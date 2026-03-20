@@ -4,6 +4,7 @@ import {
   FolderOpen, FolderPlus, ChevronDown, Check, Settings,
   Clock, ArrowLeftRight
 } from 'lucide-react'
+import api from '../../lib/api'
 
 export default function WorkspaceMenu() {
   const { workspace, recentWorkspaces, setWorkspace, clearWorkspace } = useAppStore()
@@ -12,7 +13,7 @@ export default function WorkspaceMenu() {
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectName, setProjectName] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
-  const ipc = (window as any).prabala
+  const ipc = api
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {

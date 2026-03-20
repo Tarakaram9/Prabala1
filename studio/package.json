@@ -5,7 +5,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:web": "VITE_TARGET=web vite",
     "build": "vite build && tsc -p tsconfig.electron.json",
+    "build:web": "VITE_TARGET=web vite build",
     "preview": "electron .",
     "pack": "npm run build && electron-builder"
   },

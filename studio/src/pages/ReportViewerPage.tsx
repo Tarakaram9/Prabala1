@@ -4,6 +4,7 @@ import {
   BarChart3, CheckCircle2, XCircle, Clock, ExternalLink,
   ChevronDown, ChevronRight, RefreshCw, AlertCircle, Camera
 } from 'lucide-react'
+import api from '../lib/api'
 
 interface StepResult {
   keyword: string
@@ -39,7 +40,7 @@ export default function ReportViewerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const ipc = (window as any).prabala
+  const ipc = api
 
   useEffect(() => { loadResults() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectDir])
 

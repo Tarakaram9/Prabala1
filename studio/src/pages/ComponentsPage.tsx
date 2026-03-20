@@ -9,6 +9,7 @@ import {
   GripVertical, X, Tag, ArrowUp, ArrowDown
 } from 'lucide-react'
 import yaml from 'js-yaml'
+import api from '../lib/api'
 
 // ── Keyword → params map (mirrors TestBuilderPage) ───────────────────────────
 const KEYWORD_PARAMS: Record<string, string[]> = {
@@ -233,7 +234,7 @@ export default function ComponentsPage() {
   // ── Persist ──────────────────────────────────────────────────────────────────
   async function saveToFile(defs: ComponentDef[]) {
     if (!projectDir) return
-    const ipc = (window as any).prabala
+    const ipc = api
     if (!ipc) return
     for (const comp of defs) {
       const payload = {

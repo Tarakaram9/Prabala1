@@ -3,6 +3,7 @@ import { useAppStore } from '../store/appStore'
 import {
   Database, Plus, Trash2, Save, X, FileJson, FileText, Copy, Check, FilePlus
 } from 'lucide-react'
+import api from '../lib/api'
 
 interface DataFile {
   name: string
@@ -23,7 +24,7 @@ export default function TestDataPage() {
   const [showNewFileDialog, setShowNewFileDialog] = useState(false)
   const [newFileName, setNewFileName] = useState('')
   const [newFileFormat, setNewFileFormat] = useState<'json' | 'yaml'>('json')
-  const ipc = (window as any).prabala
+  const ipc = api
 
   useEffect(() => {
     loadDataFiles()

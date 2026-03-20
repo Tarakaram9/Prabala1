@@ -12,6 +12,7 @@ import {
   Terminal, FileCode2,
 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import api from '../lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,7 @@ function parseContent(content: string): Array<{ type: 'text' | 'code'; text: str
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function CodeBlock({ lang, text }: { lang: string; text: string }) {
-  const ipc = (window as any).prabala
+  const ipc = api
   const [copied, setCopied] = useState(false)
   const [saved, setSaved] = useState(false)
   const isYaml = lang === 'yaml' || lang === 'yml'
@@ -270,7 +271,7 @@ const MODES: { id: Mode; label: string; icon: React.ElementType; placeholder: st
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const ipc = (window as any).prabala
+  const ipc = api
   const [cfg, setCfg] = useState({ endpoint: '', apiKey: '', deployment: 'gpt-4o', apiVersion: '2024-08-01-preview' })
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -458,7 +459,7 @@ function WelcomeScreen({ onSetKey }: { onSetKey: () => void }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AIPage() {
-  const ipc = (window as any).prabala
+  const ipc = api
   const projectDir = useAppStore(s => s.projectDir)
   const keywords = useAppStore(s => s.keywords)
 

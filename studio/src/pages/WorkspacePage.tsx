@@ -4,12 +4,13 @@ import {
   Sparkles, FolderOpen, FolderPlus, Clock, ChevronRight,
   ArrowRight, LogOut
 } from 'lucide-react'
+import api from '../lib/api'
 
 export default function WorkspacePage() {
   const { setWorkspace, recentWorkspaces, currentUser, logout } = useAppStore()
   const [creating, setCreating] = useState(false)
   const [wsName, setWsName] = useState('')
-  const ipc = (window as any).prabala
+  const ipc = api
 
   async function handleOpenFolder() {
     if (!ipc) return
