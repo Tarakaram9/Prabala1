@@ -10,6 +10,7 @@ export default function WorkspacePage() {
   const { setWorkspace, recentWorkspaces, currentUser, logout } = useAppStore()
   const [creating, setCreating] = useState(false)
   const [wsName, setWsName] = useState('')
+  const [parentDir, setParentDir] = useState('')
   const ipc = api
 
   async function handleOpenFolder() {
@@ -21,12 +22,15 @@ export default function WorkspacePage() {
     setWorkspace(ws)
   }
 
-  async function handleCreateWorkspace() {
-    if (!ipc || !wsName.trim()) return
+  async function handleBrowseParent() {
     const dir = await ipc.dialog.openFolder()
-    if (!dir) return
+    if (dir) setParentDir(dir)
+  }
+
+  async function handleCreateWorkspace() {
+    if (!ipc || !wsName.trim() || !parentDir.trim()) return
     const name = wsName.trim()
-    const path = `${dir}/${name.replace(/\s+/g, '-').toLowerCase()}`
+    const path = `${parentDir.trim().replace(/\/+$/, '')}/${name.replace(/\s+/g, '-').toLowerCase()}`
     // Create the workspace directory
     await ipc.fs.mkdir(path)
     // Create a default prabala.config.json
@@ -131,19 +135,49 @@ export default function WorkspacePage() {
           {creating && (
             <div className="mb-5 p-4 rounded-xl bg-surface-700/50 border border-brand-700/40 space-y-3">
               <p className="text-xs font-semibold text-brand-300 uppercase tracking-wider">New Workspace</p>
-              <input
-                autoFocus
-                type="text"
-                value={wsName}
-                onChange={e => setWsName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleCreateWorkspace()}
-                className="input w-full text-sm"
-                placeholder="Workspace name (e.g. my-project)"
-              />
-              <p className="text-xs text-slate-600">You'll then choose a parent directory — the workspace folder will be created inside it.</p>
+
+              {/* Workspace name */}
+              <div>
+                <label className="text-xs text-slate-500 mb-1 block">Workspace name</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={wsName}
+                  onChange={e => setWsName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateWorkspace()}
+                  className="input w-full text-sm"
+                  placeholder="e.g. my-project"
+                />
+              </div>
+
+              {/* Parent directory */}
+              <div>
+                <label className="text-xs text-slate-500 mb-1 block">Location <span className="text-slate-600">(folder will be created here)</span></label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={parentDir}
+                    onChange={e => setParentDir(e.target.value)}
+                    className="input flex-1 text-sm font-mono"
+                    placeholder="/Users/you/projects"
+                  />
+                  <button
+                    onClick={handleBrowseParent}
+                    className="px-3 py-1.5 bg-surface-600 hover:bg-surface-500 border border-surface-400/40 text-xs text-slate-300 rounded-lg flex-shrink-0 transition-colors"
+                  >
+                    Browse
+                  </button>
+                </div>
+                {wsName.trim() && parentDir.trim() && (
+                  <p className="text-[11px] text-slate-600 mt-1 font-mono">
+                    → {parentDir.trim().replace(/\/+$/, '')}/{wsName.trim().replace(/\s+/g, '-').toLowerCase()}
+                  </p>
+                )}
+              </div>
+
               <button
                 onClick={handleCreateWorkspace}
-                disabled={!wsName.trim()}
+                disabled={!wsName.trim() || !parentDir.trim()}
                 className="btn-primary w-full flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <ArrowRight size={14} /> Create &amp; Open
