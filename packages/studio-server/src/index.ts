@@ -201,23 +201,51 @@ app.post('/api/runner/stop', (_req: Request, res: Response) => {
 })
 
 // ── /api/recorder ─────────────────────────────────────────────────────────────
+// Uses the same recorder.cjs script as Electron — emits JSON lines:
+//   { "keyword": "Click", "params": { "locator": "..." } }
+//   { "__done": true }
 
 app.post('/api/recorder/start', (req: Request, res: Response) => {
   try {
     const { startUrl, projectDir } = req.body as { startUrl: string; projectDir: string }
-    if (recorderProcess) { recorderProcess.kill(); recorderProcess = null }
-    recorderProcess = spawn('npx', ['playwright', 'codegen', startUrl], {
-      cwd: projectDir, shell: true
+    if (recorderProcess) { recorderProcess.kill('SIGTERM'); recorderProcess = null }
+
+    // Resolve recorder.cjs relative to this file:
+    // dist/index.js → ../../../studio/electron/recorder.cjs
+    const recorderScript = path.resolve(__dirname, '../../../studio/electron/recorder.cjs')
+    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+
+    recorderProcess = spawn('node', [recorderScript, startUrl || ''], {
+      cwd: projectDir || process.cwd(),
+      env: {
+        ...process.env,
+        NODE_PATH: monoRepoNodeModules,
+      },
     })
+
     recorderProcess.stdout?.on('data', (d: Buffer) => {
-      // parse step lines and broadcast
-      const line = d.toString()
-      broadcast('recorder:step', { raw: line })
+      const lines = d.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line)
+          if (obj.__done) {
+            broadcast('recorder:done', null)
+          } else {
+            broadcast('recorder:step', obj)
+          }
+        } catch { /* ignore malformed lines */ }
+      }
     })
+
+    recorderProcess.stderr?.on('data', (d: Buffer) => {
+      console.error('[Recorder stderr]', d.toString().trim())
+    })
+
     recorderProcess.on('close', () => {
       broadcast('recorder:done', null)
       recorderProcess = null
     })
+
     res.json({ ok: true })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
