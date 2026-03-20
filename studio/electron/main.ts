@@ -261,7 +261,13 @@ function registerIpcHandlers(): void {
           if (obj.__done) {
             mainWindow?.webContents.send('spy:done');
           } else {
+            // Send locator to renderer (stdout already flushed at this point)
             mainWindow?.webContents.send('spy:locator', obj); // { locator, tag, text }
+            // Kill spy process after a short delay so the confirmation overlay
+            // is visible briefly, then the browser closes cleanly
+            setTimeout(() => {
+              if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
+            }, 300);
           }
         } catch { /* ignore malformed */ }
       }
