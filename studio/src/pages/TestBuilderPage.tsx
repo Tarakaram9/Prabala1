@@ -4,7 +4,7 @@ import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
-  X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle
+  X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle, Crosshair
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -255,6 +255,11 @@ export default function TestBuilderPage() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [objectPicker])
 
+  // Clean up spy on unmount
+  useEffect(() => {
+    return () => { api.spy.removeAllListeners() }
+  }, [])
+
   const tc = activeTestCase
 
   // ─ Recording state ───────────────────────────────────────────────────────
@@ -263,6 +268,12 @@ export default function TestBuilderPage() {
   const [recordUrl, setRecordUrl] = useState('')
   const [recordedCount, setRecordedCount] = useState(0)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
+
+  // ─ Spy state ────────────────────────────────────────────────────────────
+  const [spyTarget, setSpyTarget] = useState<{ stepId: string; key: string } | null>(null)
+  const [spyAnchor, setSpyAnchor] = useState<{ stepId: string; key: string } | null>(null)
+  const [spyUrl, setSpyUrl] = useState('')
+  const [isSpying, setIsSpying] = useState(false)
 
   // Cmd+S / Ctrl+S shortcut
   useEffect(() => {
@@ -338,6 +349,34 @@ export default function TestBuilderPage() {
 
     // Immediately trigger AI analysis when recording is done (no debounce)
     scheduleAutoAnalysis('Recording completed', 500)
+  }
+
+  // ─ Spy ────────────────────────────────────────────────────────────────────
+  function startSpy(stepId: string, key: string) {
+    if (!spyUrl.trim()) return
+    setSpyAnchor(null)
+    setSpyTarget({ stepId, key })
+    setIsSpying(true)
+    api.spy.removeAllListeners()
+    api.spy.onLocator(({ locator }) => {
+      updateParam(stepId, key, locator)
+      setSpyTarget(null)
+      setIsSpying(false)
+      api.spy.removeAllListeners()
+    })
+    api.spy.onDone(() => {
+      setSpyTarget(null)
+      setIsSpying(false)
+      api.spy.removeAllListeners()
+    })
+    api.spy.start(spyUrl)
+  }
+
+  function stopSpy() {
+    api.spy.stop()
+    api.spy.removeAllListeners()
+    setSpyTarget(null)
+    setIsSpying(false)
   }
 
   // Append a recorded step into the active test case via atomic store update
@@ -1121,18 +1160,49 @@ steps:
                         /* ── Generic param rendering ── */
                         paramKeys.map(key => {
                           const isLocator = key === 'locator' || key.toLowerCase().includes('locator')
+                          const hasObjects = isLocator && objects.length > 0
+                          const hasTestData = testDataVars.length > 0
+                          // Button layout (right-to-left): [testdata] [object] [spy]
+                          const btnCount = (isLocator ? 1 : 0) + (hasObjects ? 1 : 0) + (hasTestData ? 1 : 0)
+                          const inputPr = btnCount >= 3 ? 'pr-[76px]' : btnCount === 2 ? 'pr-14' : btnCount === 1 ? 'pr-7' : ''
+                          const objectRight = hasTestData ? 'right-7' : 'right-1.5'
+                          const spyRight = hasObjects && hasTestData ? 'right-[52px]' : (hasObjects || hasTestData) ? 'right-7' : 'right-1.5'
+                          const isSpyingThisField = spyTarget?.stepId === step.id && spyTarget?.key === key
+                          const showSpyPopover = spyAnchor?.stepId === step.id && spyAnchor?.key === key
                           return (
                           <div key={key} className="flex items-center gap-2">
                             <label className="text-xs text-slate-500 font-mono w-24 flex-shrink-0">{key}</label>
                             <div className="relative flex-1">
                               <input
-                                className={`input text-xs font-mono w-full ${(isLocator && objects.length > 0) || testDataVars.length > 0 ? (isLocator && objects.length > 0 && testDataVars.length > 0 ? 'pr-14' : 'pr-7') : ''}`}
+                                className={`input text-xs font-mono w-full ${inputPr} ${isSpyingThisField ? 'border-violet-500/70 ring-1 ring-violet-500/30' : ''}`}
                                 value={step.params[key] ?? ''}
                                 onChange={e => updateParam(step.id, key, e.target.value)}
-                                placeholder={isLocator ? `@object or css/xpath/text=...` : `{${key.toUpperCase()}} or {{TEST_DATA.x}}`}
+                                placeholder={isLocator ? (isSpyingThisField ? '⟳ Waiting for spy pick…' : '@object · spy · css/xpath/text=...') : `{${key.toUpperCase()}} or {{TEST_DATA.x}}`}
                               />
+                              {/* ── Spy (crosshair) button — locator fields only ── */}
+                              {isLocator && (
+                                <button
+                                  type="button"
+                                  title={isSpyingThisField ? 'Spy active — click element in browser' : 'Spy: open browser to pick an element'}
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    if (isSpyingThisField) return
+                                    setSpyAnchor(prev => prev?.stepId === step.id && prev?.key === key ? null : { stepId: step.id, key })
+                                    setSpyUrl(prev => prev || recordUrl)
+                                    setObjectPicker(null)
+                                    setParamPicker(null)
+                                  }}
+                                  className={`absolute top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors ${spyRight} ${
+                                    isSpyingThisField
+                                      ? 'text-violet-400 animate-pulse cursor-default'
+                                      : 'text-slate-600 hover:text-violet-400 hover:bg-surface-600'
+                                  }`}
+                                >
+                                  <Crosshair size={11} />
+                                </button>
+                              )}
                               {/* @Object picker button — only for locator params */}
-                              {isLocator && objects.length > 0 && (
+                              {hasObjects && (
                                 <button
                                   type="button"
                                   title="Insert @object reference"
@@ -1142,29 +1212,65 @@ steps:
                                       prev?.stepId === step.id && prev?.key === key ? null : { stepId: step.id, key }
                                     )
                                     setParamPicker(null)
+                                    setSpyAnchor(null)
                                   }}
-                                  className={`absolute top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-green-400 hover:bg-surface-600 transition-colors ${testDataVars.length > 0 ? 'right-7' : 'right-1.5'}`}
+                                  className={`absolute top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-green-400 hover:bg-surface-600 transition-colors ${objectRight}`}
                                 >
                                   <AtSign size={11} />
                                 </button>
                               )}
                               {/* Test Data picker button */}
-                              {testDataVars.length > 0 && (
+                              {hasTestData && (
                                 <button
                                   type="button"
                                   title="Insert test data variable"
                                   onClick={e => {
                                     e.stopPropagation()
                                     setParamPicker(prev =>
-                                      prev?.stepId === step.id && prev?.key === key ? null
-                                        : { stepId: step.id, key }
+                                      prev?.stepId === step.id && prev?.key === key ? null : { stepId: step.id, key }
                                     )
                                     setObjectPicker(null)
+                                    setSpyAnchor(null)
                                   }}
                                   className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-600 hover:text-brand-400 hover:bg-surface-600 transition-colors"
                                 >
                                   <Database size={11} />
                                 </button>
+                              )}
+                              {/* ── Spy URL popover ── */}
+                              {showSpyPopover && (
+                                <div className="absolute z-50 top-full mt-1 left-0 w-80 bg-surface-800 border border-violet-700/50 rounded-lg shadow-xl">
+                                  <div className="px-3 py-2 border-b border-surface-600 flex items-center gap-2">
+                                    <Crosshair size={11} className="text-violet-400" />
+                                    <span className="text-[11px] text-violet-300 font-semibold">Element Spy</span>
+                                    <span className="text-[10px] text-slate-500 ml-1">hover &amp; click to capture locator</span>
+                                    {isSpying && <span className="ml-auto text-[10px] text-violet-400 animate-pulse">Active…</span>}
+                                  </div>
+                                  <div className="p-3 space-y-2">
+                                    <input
+                                      autoFocus
+                                      className="input text-xs font-mono w-full"
+                                      placeholder="https://example.com"
+                                      value={spyUrl}
+                                      onChange={e => setSpyUrl(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') startSpy(step.id, key)
+                                        if (e.key === 'Escape') setSpyAnchor(null)
+                                      }}
+                                    />
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => startSpy(step.id, key)}
+                                        disabled={!spyUrl.trim()}
+                                        className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                                      >
+                                        <Crosshair size={11} /> Open Spy Browser
+                                      </button>
+                                      <button type="button" onClick={() => setSpyAnchor(null)} className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 border border-surface-500 rounded-lg">Cancel</button>
+                                    </div>
+                                  </div>
+                                </div>
                               )}
                               {/* Object picker dropdown */}
                               {objectPicker?.stepId === step.id && objectPicker?.key === key && (

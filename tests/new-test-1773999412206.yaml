@@ -1,0 +1,5 @@
+testCase: New Test Case
+steps:
+  - keyword: Web.Launch
+    description: https://iot-ot-convergence.orangeglacier-4ff26b13.eastus.azurecontainerapps.io/
+  - keyword: Web.Close

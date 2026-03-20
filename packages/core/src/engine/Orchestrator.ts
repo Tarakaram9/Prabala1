@@ -58,7 +58,7 @@ export class Orchestrator {
     }
 
     return {
-      variables: { BASE_URL: this.config.baseUrl ?? '' },
+      variables: { BASE_URL: this.config.baseUrl ?? '', __config__: this.config as unknown },
       objectRepository,
       testData,
       artifacts,

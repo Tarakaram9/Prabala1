@@ -181,9 +181,9 @@ program
 
     try {
       // Run with filtered files by building a temp pattern from absolute paths
-      const suite = await (orchestrator as any).runFiles
+      const suite = await ((orchestrator as any).runFiles
         ? (orchestrator as any).runFiles(files)
-        : orchestrator.runPattern(pattern);
+        : orchestrator.runPattern(pattern));
 
       writeReports(suite, outputDir, opts.reporter);
       process.exit(suite.failed > 0 ? 1 : 0);

@@ -36,6 +36,7 @@ httpServer.on('upgrade', (request, socket, head) => {
 // ── Active processes ──────────────────────────────────────────────────────────
 let runnerProcess: ChildProcess | null = null
 let recorderProcess: ChildProcess | null = null
+let spyProcess: ChildProcess | null = null
 
 // ── WebSocket channel registry ────────────────────────────────────────────────
 const wsClients = new Set<WebSocket>()
@@ -253,8 +254,60 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
 })
 
 app.post('/api/recorder/stop', (_req: Request, res: Response) => {
-  if (recorderProcess) { recorderProcess.kill(); recorderProcess = null }
+  if (recorderProcess) { recorderProcess.kill('SIGTERM'); recorderProcess = null }
   broadcast('recorder:done', null)
+  res.json({ ok: true })
+})
+
+// ── /api/spy ──────────────────────────────────────────────────────────────────
+// Opens a browser with element highlight overlay; user clicks element to capture locator.
+// Emits { locator, tag, text } via spy:locator WS event, then { spy:done } on close.
+
+app.post('/api/spy/start', (req: Request, res: Response) => {
+  try {
+    const { url } = req.body as { url: string }
+    if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+
+    const spyScript = path.resolve(__dirname, '../../../studio/electron/spy.cjs')
+    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+
+    spyProcess = spawn('node', [spyScript, url || 'about:blank'], {
+      cwd: process.cwd(),
+      env: { ...process.env, NODE_PATH: monoRepoNodeModules },
+    })
+
+    spyProcess.stdout?.on('data', (d: Buffer) => {
+      const lines = d.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line)
+          if (obj.__done) {
+            broadcast('spy:done', null)
+          } else {
+            broadcast('spy:locator', obj)  // { locator, tag, text }
+          }
+        } catch { /* ignore malformed */ }
+      }
+    })
+
+    spyProcess.stderr?.on('data', (d: Buffer) => {
+      console.error('[Spy stderr]', d.toString().trim())
+    })
+
+    spyProcess.on('close', () => {
+      broadcast('spy:done', null)
+      spyProcess = null
+    })
+
+    res.json({ ok: true })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/spy/stop', (_req: Request, res: Response) => {
+  if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+  broadcast('spy:done', null)
   res.json({ ok: true })
 })
 

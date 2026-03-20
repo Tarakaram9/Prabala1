@@ -171,6 +171,25 @@ const api = {
     },
   },
 
+  spy: {
+    async start(url: string): Promise<void> {
+      getWs()
+      await post('/spy/start', { url })
+    },
+    async stop(): Promise<void> {
+      await post('/spy/stop', {})
+    },
+    onLocator(cb: (result: { locator: string; tag: string; text: string }) => void): void {
+      wsOn('spy:locator', (p) => cb(p as { locator: string; tag: string; text: string }))
+    },
+    onDone(cb: () => void): void {
+      wsOn('spy:done', () => cb())
+    },
+    removeAllListeners(): void {
+      wsOffAll(['spy:locator', 'spy:done'])
+    },
+  },
+
   shell: {
     async openPath(filePath: string): Promise<void> {
       await post('/shell/open', { path: filePath })
