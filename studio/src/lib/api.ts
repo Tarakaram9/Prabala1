@@ -77,38 +77,10 @@ async function del<T>(path: string, params?: Record<string, string>): Promise<T>
   return r.json() as Promise<T>
 }
 
-// ── dialog.openFolder() — web path input ──────────────────────────────────────
-// Shows a lightweight modal asking the user to type/paste a folder path.
+// ── dialog.openFolder() — replaced by FolderBrowserModal in React components ─
+// Returns undefined; actual folder browsing done via FolderBrowserModal component
 function openFolderDialog(): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    // Inject a minimal modal — no React dep so it works anywhere
-    const overlay = document.createElement('div')
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99999;display:flex;align-items:center;justify-content:center'
-    overlay.innerHTML = `
-      <div style="background:#1e2433;border:1px solid #334155;border-radius:12px;padding:24px 28px;width:480px;font-family:sans-serif">
-        <p style="color:#e2e8f0;font-size:14px;font-weight:600;margin:0 0 12px">Open Workspace Folder</p>
-        <p style="color:#94a3b8;font-size:12px;margin:0 0 12px">Enter the absolute path to your project folder:</p>
-        <input id="__prabala_path__" type="text" placeholder="/Users/you/my-project"
-          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #475569;border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:13px;font-family:monospace;outline:none"/>
-        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
-          <button id="__prabala_cancel__" style="padding:8px 16px;background:#334155;border:none;border-radius:6px;color:#e2e8f0;font-size:13px;cursor:pointer">Cancel</button>
-          <button id="__prabala_ok__" style="padding:8px 16px;background:#6366f1;border:none;border-radius:6px;color:#fff;font-size:13px;cursor:pointer;font-weight:600">Open</button>
-        </div>
-      </div>`
-    document.body.appendChild(overlay)
-    const input = overlay.querySelector<HTMLInputElement>('#__prabala_path__')!
-    const ok = overlay.querySelector<HTMLButtonElement>('#__prabala_ok__')!
-    const cancel = overlay.querySelector<HTMLButtonElement>('#__prabala_cancel__')!
-    input.focus()
-    const finish = (val: string | undefined) => { document.body.removeChild(overlay); resolve(val) }
-    ok.onclick = () => { const v = input.value.trim(); finish(v || undefined) }
-    cancel.onclick = () => finish(undefined)
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') ok.click()
-      if (e.key === 'Escape') cancel.click()
-    })
-  })
+  return Promise.resolve(undefined)
 }
 
 // ── Public API — same shape as window.prabala ─────────────────────────────────

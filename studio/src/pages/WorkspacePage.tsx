@@ -5,30 +5,27 @@ import {
   ArrowRight, LogOut
 } from 'lucide-react'
 import api from '../lib/api'
+import FolderBrowserModal from '../components/FolderBrowserModal'
 
 export default function WorkspacePage() {
   const { setWorkspace, recentWorkspaces, currentUser, logout } = useAppStore()
   const [creating, setCreating] = useState(false)
   const [wsName, setWsName] = useState('')
   const [parentDir, setParentDir] = useState('')
+  // 'open' = pick existing workspace root, 'create' = pick parent for new workspace
+  const [showBrowser, setShowBrowser] = useState<'open' | 'create' | null>(null)
   const ipc = api
 
-  async function handleOpenFolder() {
-    if (!ipc) return
-    const dir = await ipc.dialog.openFolder()
-    if (!dir) return
-    const name = dir.split('/').pop() ?? dir
+  function handleOpenFolderSelected(dir: string) {
+    setShowBrowser(null)
+    const name = dir.split('/').filter(Boolean).pop() ?? dir
     const ws: Workspace = { name, path: dir }
     setWorkspace(ws)
   }
 
-  async function handleBrowseParent() {
-    const dir = await ipc.dialog.openFolder()
-    if (dir) setParentDir(dir)
-  }
 
   async function handleCreateWorkspace() {
-    if (!ipc || !wsName.trim() || !parentDir.trim()) return
+    if (!wsName.trim() || !parentDir.trim()) return
     const name = wsName.trim()
     const path = `${parentDir.trim().replace(/\/+$/, '')}/${name.replace(/\s+/g, '-').toLowerCase()}`
     // Create the workspace directory
@@ -98,7 +95,7 @@ export default function WorkspacePage() {
           <div className="grid grid-cols-2 gap-3 mb-6">
             {/* Open existing */}
             <button
-              onClick={handleOpenFolder}
+              onClick={() => setShowBrowser('open')}
               className="flex flex-col items-center gap-3 p-5 rounded-xl border border-surface-500/60 bg-surface-700/40 hover:bg-surface-700/80 hover:border-brand-600/50 transition-all text-center group"
             >
               <div className="w-10 h-10 rounded-lg bg-brand-600/20 flex items-center justify-center group-hover:bg-brand-600/40 transition-colors">
@@ -162,7 +159,7 @@ export default function WorkspacePage() {
                     placeholder="/Users/you/projects"
                   />
                   <button
-                    onClick={handleBrowseParent}
+                    onClick={() => setShowBrowser('create')}
                     className="px-3 py-1.5 bg-surface-600 hover:bg-surface-500 border border-surface-400/40 text-xs text-slate-300 rounded-lg flex-shrink-0 transition-colors"
                   >
                     Browse
@@ -215,6 +212,23 @@ export default function WorkspacePage() {
           Prabala Studio v0.1 · Apache 2.0 · Open Source
         </p>
       </div>
+
+      {/* Folder browser modals */}
+      {showBrowser === 'open' && (
+        <FolderBrowserModal
+          title="Open Workspace Folder"
+          onSelect={handleOpenFolderSelected}
+          onCancel={() => setShowBrowser(null)}
+        />
+      )}
+      {showBrowser === 'create' && (
+        <FolderBrowserModal
+          title="Choose Location for New Workspace"
+          initialPath={parentDir || undefined}
+          onSelect={(dir) => { setParentDir(dir); setShowBrowser(null) }}
+          onCancel={() => setShowBrowser(null)}
+        />
+      )}
     </div>
   )
 }

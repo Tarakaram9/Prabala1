@@ -5,6 +5,7 @@ import {
   Clock, ArrowLeftRight
 } from 'lucide-react'
 import api from '../../lib/api'
+import FolderBrowserModal from '../FolderBrowserModal'
 
 export default function WorkspaceMenu() {
   const { workspace, recentWorkspaces, setWorkspace, clearWorkspace } = useAppStore()
@@ -12,6 +13,7 @@ export default function WorkspaceMenu() {
   const [open, setOpen] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectName, setProjectName] = useState('')
+  const [showBrowser, setShowBrowser] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const ipc = api
 
@@ -44,9 +46,8 @@ export default function WorkspaceMenu() {
   }
 
   async function handleOpenProject() {
-    if (!ipc) return
-    const dir = await ipc.dialog.openFolder()
-    if (dir) { setProjectDir(dir); setOpen(false) }
+    setOpen(false)
+    setShowBrowser(true)
   }
 
   async function handleSwitchWorkspace() {
@@ -164,6 +165,15 @@ export default function WorkspaceMenu() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Folder browser for opening a project */}
+      {showBrowser && (
+        <FolderBrowserModal
+          title="Open Project Folder"
+          onSelect={(dir) => { setProjectDir(dir); setShowBrowser(false) }}
+          onCancel={() => setShowBrowser(false)}
+        />
       )}
     </div>
   )
