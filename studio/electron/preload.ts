@@ -68,7 +68,21 @@ contextBridge.exposeInMainWorld('prabala', {
       ipcRenderer.removeAllListeners('recorder:done');
     },
   },
-
+  // ── Element Spy ──────────────────────────────────────────────────────────────
+  spy: {
+    start: (url: string) => ipcRenderer.invoke('spy:start', url),
+    stop: () => ipcRenderer.invoke('spy:stop'),
+    onLocator: (cb: (result: { locator: string; tag: string; text: string }) => void) => {
+      ipcRenderer.on('spy:locator', (_e, result) => cb(result));
+    },
+    onDone: (cb: () => void) => {
+      ipcRenderer.once('spy:done', () => cb());
+    },
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('spy:locator');
+      ipcRenderer.removeAllListeners('spy:done');
+    },
+  },
   // ── App ──────────────────────────────────────────────────────────────────────
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
@@ -133,6 +147,13 @@ declare global {
         start(url: string, projectDir: string): Promise<void>;
         stop(): Promise<void>;
         onStep(cb: (step: { keyword: string; params: Record<string, string> }) => void): void;
+        onDone(cb: () => void): void;
+        removeAllListeners(): void;
+      };
+      spy: {
+        start(url: string): Promise<void>;
+        stop(): Promise<void>;
+        onLocator(cb: (result: { locator: string; tag: string; text: string }) => void): void;
         onDone(cb: () => void): void;
         removeAllListeners(): void;
       };

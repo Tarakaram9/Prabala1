@@ -235,6 +235,56 @@ function registerIpcHandlers(): void {
     return true;
   });
 
+  // ── Element Spy ───────────────────────────────────────────────────────────────
+  let spyProcess: ReturnType<typeof spawn> | null = null;
+
+  ipcMain.handle('spy:start', (_e, url: string) => {
+    if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
+
+    const spyScript = isDev
+      ? path.join(__dirname, '..', 'electron', 'spy.cjs')
+      : path.join(__dirname, 'spy.cjs');
+
+    spyProcess = spawn('node', [spyScript, url || 'about:blank'], {
+      cwd: path.dirname(spyScript),
+      env: {
+        ...process.env,
+        NODE_PATH: path.join(__dirname, '..', '..', 'node_modules'),
+      },
+    });
+
+    spyProcess.stdout?.on('data', (data: Buffer) => {
+      const lines = data.toString().split('\n').filter(Boolean);
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.__done) {
+            mainWindow?.webContents.send('spy:done');
+          } else {
+            mainWindow?.webContents.send('spy:locator', obj); // { locator, tag, text }
+          }
+        } catch { /* ignore malformed */ }
+      }
+    });
+
+    spyProcess.stderr?.on('data', (data: Buffer) => {
+      console.error('[Spy stderr]', data.toString().trim());
+    });
+
+    spyProcess.on('close', () => {
+      mainWindow?.webContents.send('spy:done');
+      spyProcess = null;
+    });
+
+    return true;
+  });
+
+  ipcMain.handle('spy:stop', () => {
+    spyProcess?.kill('SIGTERM');
+    spyProcess = null;
+    return true;
+  });
+
   // ── Shell ────────────────────────────────────────────────────────────────────
   ipcMain.handle('shell:openPath', (_e, filePath: string) => {
     shell.openPath(filePath);
