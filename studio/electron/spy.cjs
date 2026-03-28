@@ -1,10 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Prabala Studio – Element Spy  v3  (route-intercept architecture)
+// Prabala Studio – Element Spy  v4
 //
-// Architecture: instead of exposeFunction CDP bindings (fragile), the injected
-// page script fires a plain fetch() to the current origin + /prabala-spy-capture.
-// Playwright intercepts that request via context.route() at the network level —
-// no CDP binding, no race conditions, works on any page origin.
+// Fixes over v3:
+//  1. bypassCSP: true  — page CSP can no longer block our fetch()
+//  2. addInitScript used ONLY for the locator-strategy (no DOM access)
+//     The spy UI is injected via page.on('domcontentloaded') where body exists
+//  3. context.route('http://prabala.spy/**') still captures the click
+//  4. spy.cjs no longer closes the browser itself — parent kills via SIGTERM
 //
 // stdout: { "locator": "...", "tag": "...", "text": "..." }
 //         { "__done": true }  ← browser closed without a pick
@@ -144,49 +146,52 @@ async function run() {
       '--window-size=1280,820',
       '--window-position=80,80',
       '--disable-infobars',
-      '--disable-web-security',  // allows fetch to any origin
+      '--disable-web-security',
       '--disable-features=IsolateOrigins,site-per-process',
     ],
   });
 
-  const context = await browser.newContext({ viewport: null });
+  // bypassCSP: true ensures page CSP headers cannot block our fetch() call
+  const context = await browser.newContext({ viewport: null, bypassCSP: true });
 
-  // ── Primary capture mechanism: route interception ───────────────────────────
-  // The injected JS calls fetch(<origin>/prabala-spy-capture).
-  // Playwright intercepts it here at the network level — no CDP binding needed.
+  // ── Capture: route interception (network-level, no CDP binding) ─────────────
+  // The spy UI calls fetch('http://prabala.spy/capture'). Playwright intercepts
+  // it here before any DNS lookup — works regardless of page origin or CSP.
   let captured = false;
-  // Uses a fixed fake hostname so it works even on about:blank pages
   await context.route('http://prabala.spy/**', async (route) => {
     if (captured) { await route.fulfill({ status: 200, body: 'ok' }); return; }
     try {
-      const body = route.request().postDataJSON();
-      emit({ locator: body.locator, tag: body.tag, text: body.text });
+      const raw = route.request().postData();
+      const body = JSON.parse(raw || '{}');
+      emit({ locator: body.locator || '', tag: body.tag || '', text: body.text || '' });
       captured = true;
     } catch (err) {
       process.stderr.write('[Spy] route parse error: ' + String(err) + '\n');
     }
     await route.fulfill({ status: 200, body: 'ok' });
-    // Give stdout time to flush, then exit
-    setTimeout(() => { browser.close().catch(() => {}); }, 400);
+    // Parent process (server/electron main) will kill us via SIGTERM in ~300ms
   });
 
-  // ── Fallback: exposeFunction (belt-and-suspenders) ──────────────────────────
-  await context.exposeFunction('__prabalaSendLocator', (locator, tag, text) => {
-    if (captured) return;
-    captured = true;
-    emit({ locator, tag, text });
-    setTimeout(() => { browser.close().catch(() => {}); }, 400);
-  });
-
-  // Inject locator strategy + spy UI before any page scripts
-  await context.addInitScript(LOCATOR_STRATEGY + '\n' + SPY_UI);
+  // ── addInitScript: ONLY the locator strategy (pure JS, zero DOM access) ─────
+  // SPY_UI is injected later via page.on('domcontentloaded') where body exists.
+  await context.addInitScript(LOCATOR_STRATEGY);
 
   const page = await context.newPage();
+
+  // ── Inject spy UI after every navigation, once body is available ─────────────
+  async function injectSpyUI() {
+    try {
+      await page.evaluate(SPY_UI);
+    } catch (e) {
+      process.stderr.write('[Spy] inject error: ' + String(e) + '\n');
+    }
+  }
+  page.on('domcontentloaded', injectSpyUI);
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') process.stderr.write('[Spy page] ' + msg.text() + '\n');
   });
-  page.on('pageerror', (err) => process.stderr.write('[Spy page error] ' + err.message + '\n'));
+  page.on('pageerror', (err) => process.stderr.write('[Spy pageerror] ' + err.message + '\n'));
 
   if (startUrl && startUrl !== 'about:blank') {
     try {
@@ -194,6 +199,9 @@ async function run() {
     } catch (e) {
       process.stderr.write('[Spy] navigate warning: ' + String(e) + '\n');
     }
+  } else {
+    // about:blank has body immediately — inject now
+    await injectSpyUI();
   }
 
   browser.on('disconnected', () => {
