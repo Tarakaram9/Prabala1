@@ -22,29 +22,183 @@ function emit(obj) {
 
 // ── Locator strategy ─────────────────────────────────────────────────────────
 const LOCATOR_STRATEGY = `
-window.__prabalaGetLocator = function(el) {
+window.__prabalaNormalizeSpyTarget = function(input) {
+  if (!input) return null;
+  var el = input.nodeType === 1 ? input : input.parentElement;
+  if (!el || el === document.body || el === document.documentElement) return el;
+
+  // Prefer semantic/interactive ancestor so nested spans/icons resolve correctly.
+  var semantic = el.closest(
+    'label,input,textarea,select,option,button,a,' +
+    '[role="button"],[role="radio"],[role="textbox"],[role="combobox"],[role="listbox"],[role="option"],' +
+    '[data-testid],[data-cy],[data-test],[contenteditable="true"]'
+  );
+  return semantic || el;
+};
+
+window.__prabalaGetLocator = function(inputEl) {
+  var el = window.__prabalaNormalizeSpyTarget(inputEl);
   if (!el || el === document.body || el === document.documentElement) return null;
-  if (el.id && !el.id.match(/^\\d/) && !el.id.match(/^[a-f0-9-]{8,}$/i)) return '#' + el.id;
-  var t = el.getAttribute('data-testid') || el.getAttribute('data-cy') || el.getAttribute('data-test');
-  if (t) return '[data-testid="' + t + '"]';
-  var a = el.getAttribute('aria-label');
-  if (a) return '[aria-label="' + a + '"]';
-  var ph = el.getAttribute('placeholder');
-  if (ph) return '[placeholder="' + ph + '"]';
-  var nm = el.getAttribute('name');
-  if (nm && ['INPUT','SELECT','TEXTAREA'].indexOf(el.tagName) !== -1)
-    return '[name="' + nm + '"]';
-  if (['INPUT','TEXTAREA','SELECT','OPTION'].indexOf(el.tagName) === -1) {
-    var txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60);
-    if (txt && txt.length < 60) return 'text=' + txt;
+
+  function q(v) {
+    return String(v || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
-  var role = el.getAttribute('role');
-  if (role) return '[role="' + role + '"]';
+
+  function cssEsc(v) {
+    var s = String(v || '');
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+    return s.replace(/([^a-zA-Z0-9_-])/g, '\\\\$1');
+  }
+
+  function stableId(id) {
+    return !!id && !/^\\d/.test(id) && !/^[a-f0-9-]{8,}$/i.test(id);
+  }
+
+  function norm(v) {
+    return String(v || '').trim().replace(/\\s+/g, ' ');
+  }
+
+  function stableClassList(node) {
+    return Array.from(node.classList || [])
+      .filter(function(c) {
+        return c && c.length < 40 && !/^ng-/.test(c) && !/\\d{3,}/.test(c);
+      })
+      .slice(0, 3);
+  }
+
+  function cssPath(node) {
+    var parts = [];
+    var cur = node;
+    var hops = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.body && hops < 7) {
+      if (stableId(cur.id)) {
+        parts.unshift('#' + cssEsc(cur.id));
+        return parts.join(' > ');
+      }
+
+      var tag = cur.tagName.toLowerCase();
+      var cls = stableClassList(cur);
+      var seg = tag;
+
+      if (cls.length) {
+        seg += '.' + cls.map(cssEsc).join('.');
+      } else {
+        var idx = 1;
+        var sib = cur;
+        while ((sib = sib.previousElementSibling)) {
+          if (sib.tagName === cur.tagName) idx++;
+        }
+        seg += ':nth-of-type(' + idx + ')';
+      }
+
+      parts.unshift(seg);
+      cur = cur.parentElement;
+      hops++;
+    }
+    return parts.join(' > ');
+  }
+
   var tag = el.tagName.toLowerCase();
-  var cls = Array.from(el.classList)
-    .filter(function(c) { return !c.match(/\\d{3,}/) && c.length < 30; })
-    .slice(0, 2).join('.');
-  return tag + (cls ? '.' + cls : '');
+  var role = (el.getAttribute('role') || '').toLowerCase();
+
+  // Highest priority: id / test attributes
+  if (stableId(el.id)) return '#' + cssEsc(el.id);
+
+  var testid = el.getAttribute('data-testid') || el.getAttribute('data-cy') || el.getAttribute('data-test');
+  if (testid) return '[data-testid="' + q(testid) + '"]';
+
+  // Label-specific
+  if (tag === 'label') {
+    var htmlFor = el.getAttribute('for');
+    if (htmlFor) return 'label[for="' + q(htmlFor) + '"]';
+    var ltxt = norm(el.innerText || el.textContent);
+    if (ltxt) return 'text=' + ltxt.slice(0, 80);
+  }
+
+  // Option inside native select
+  if (tag === 'option') {
+    var val = el.getAttribute('value');
+    var txt = norm(el.innerText || el.textContent);
+    var parentSelect = el.closest('select');
+    var parentLoc = parentSelect ? window.__prabalaGetLocator(parentSelect) : null;
+    if (parentLoc && val) return parentLoc + ' option[value="' + q(val) + '"]';
+    if (parentLoc && txt) return parentLoc + ' option';
+    if (val) return 'option[value="' + q(val) + '"]';
+  }
+
+  // Inputs / textboxes / radios
+  if (tag === 'input') {
+    var type = (el.getAttribute('type') || 'text').toLowerCase();
+    var name = el.getAttribute('name');
+    var value = el.getAttribute('value');
+    var placeholder = el.getAttribute('placeholder');
+    var ariaLabel = el.getAttribute('aria-label');
+
+    if (type === 'radio') {
+      if (name && value) return 'input[type="radio"][name="' + q(name) + '"][value="' + q(value) + '"]';
+      if (name) return 'input[type="radio"][name="' + q(name) + '"]';
+      return 'input[type="radio"]';
+    }
+
+    if (type === 'checkbox') {
+      if (name) return 'input[type="checkbox"][name="' + q(name) + '"]';
+      if (ariaLabel) return 'input[type="checkbox"][aria-label="' + q(ariaLabel) + '"]';
+      return 'input[type="checkbox"]';
+    }
+
+    if (name) return 'input[name="' + q(name) + '"]';
+    if (placeholder) return 'input[placeholder="' + q(placeholder) + '"]';
+    if (ariaLabel) return 'input[aria-label="' + q(ariaLabel) + '"]';
+  }
+
+  if (tag === 'textarea') {
+    var tn = el.getAttribute('name');
+    var tph = el.getAttribute('placeholder');
+    if (tn) return 'textarea[name="' + q(tn) + '"]';
+    if (tph) return 'textarea[placeholder="' + q(tph) + '"]';
+    return 'textarea';
+  }
+
+  if (tag === 'select') {
+    var sn = el.getAttribute('name');
+    var sa = el.getAttribute('aria-label');
+    if (sn) return 'select[name="' + q(sn) + '"]';
+    if (sa) return 'select[aria-label="' + q(sa) + '"]';
+    return 'select';
+  }
+
+  // ARIA roles for custom controls
+  if (role) {
+    var roleLabel = el.getAttribute('aria-label');
+    if (roleLabel) return '[role="' + q(role) + '"][aria-label="' + q(roleLabel) + '"]';
+    if (role === 'listbox' || role === 'option' || role === 'radio' || role === 'textbox' || role === 'combobox') {
+      return '[role="' + q(role) + '"]';
+    }
+  }
+
+  // Generic aria/name/placeholder hooks
+  var aria = el.getAttribute('aria-label');
+  if (aria) return '[aria-label="' + q(aria) + '"]';
+  var nm = el.getAttribute('name');
+  if (nm && ['input', 'select', 'textarea'].indexOf(tag) !== -1) return tag + '[name="' + q(nm) + '"]';
+  var ph = el.getAttribute('placeholder');
+  if (ph) return tag + '[placeholder="' + q(ph) + '"]';
+
+  // Text locator for non-form controls
+  if (['input', 'textarea', 'select', 'option'].indexOf(tag) === -1) {
+    var txt2 = norm(el.innerText || el.textContent);
+    if (txt2 && txt2.length < 90) return 'text=' + txt2;
+  }
+
+  // Class-based fallback
+  var cls2 = stableClassList(el);
+  if (cls2.length) return tag + '.' + cls2.map(cssEsc).join('.');
+
+  // Deep fallback for nested structures
+  var path = cssPath(el);
+  if (path) return path;
+
+  return tag;
 };
 `;
 
@@ -75,17 +229,62 @@ const SPY_UI = `
   var ov  = document.createElement('div'); ov.id  = '__ps_ov';
   var tip = document.createElement('div'); tip.id = '__ps_tip';
   var ban = document.createElement('div'); ban.id = '__ps_banner';
-  ban.textContent = '\\u{1F52E} Prabala Spy \\u2014 hover to preview, click to capture';
+    ban.textContent = '\u{1F52E} Prabala Spy \u2014 hover to preview, left click or right click to capture';
   document.body.appendChild(ov);
   document.body.appendChild(tip);
   document.body.appendChild(ban);
   document.body.classList.add('__ps_on');
 
   var skip = [ov, tip, ban];
+  var __psCaptured = false;
+
+  function pickElementFromEvent(e) {
+    var byPoint = null;
+    if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+      byPoint = document.elementFromPoint(e.clientX, e.clientY);
+    }
+    var el = byPoint || e.target;
+    if (el && el.nodeType !== 1) el = el.parentElement;
+    if (window.__prabalaNormalizeSpyTarget) {
+      el = window.__prabalaNormalizeSpyTarget(el);
+    }
+    if (!el || skip.indexOf(el) !== -1) return null;
+    return el;
+  }
+
+  function captureElement(el) {
+    if (!el || __psCaptured) return;
+    __psCaptured = true;
+    var loc = (window.__prabalaGetLocator && window.__prabalaGetLocator(el)) || el.tagName.toLowerCase();
+    var tag = el.tagName.toLowerCase();
+    var txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+
+    // ── Send via fetch — intercepted by Playwright context.route ─────────────
+    // Fixed fake hostname works on any page, including about:blank
+    fetch('https://prabala.spy/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locator: loc, tag: tag, text: txt }),
+    }).catch(function() {});
+
+    // Fallback: also try __prabalaSendLocator if available (exposeFunction)
+    if (typeof window.__prabalaSendLocator === 'function') {
+      window.__prabalaSendLocator(loc, tag, txt);
+    }
+
+    // Green success banner
+    ban.style.cssText =
+      'position:fixed!important;z-index:2147483645!important;pointer-events:none!important;' +
+      'top:10px!important;left:50%!important;transform:translateX(-50%)!important;' +
+      'background:#14532d!important;color:#bbf7d0!important;font:600 13px system-ui!important;' +
+      'padding:8px 18px!important;border-radius:20px!important;border:1px solid #22c55e!important;';
+    ban.textContent = '\u2705 Captured \u2014 you can close this window';
+    tip.style.display = 'none';
+  }
 
   document.addEventListener('mousemove', function(e) {
-    var el = e.target;
-    if (!el || skip.indexOf(el) !== -1) return;
+    var el = pickElementFromEvent(e);
+    if (!el) return;
     var r = el.getBoundingClientRect();
     ov.style.cssText =
       'position:fixed!important;z-index:2147483640!important;pointer-events:none!important;' +
@@ -105,36 +304,31 @@ const SPY_UI = `
     tip.textContent = loc + '\\n<' + el.tagName.toLowerCase() + '>';
   }, true);
 
-  document.addEventListener('click', function(e) {
-    var el = e.target;
-    if (!el || skip.indexOf(el) !== -1) return;
+  // Primary capture path: mousedown + elementFromPoint works even for disabled controls.
+  document.addEventListener('mousedown', function(e) {
+    var el = pickElementFromEvent(e);
+    if (!el) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    var loc = (window.__prabalaGetLocator && window.__prabalaGetLocator(el)) || el.tagName.toLowerCase();
-    var tag = el.tagName.toLowerCase();
-    var txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
+    captureElement(el);
+  }, true);
 
-    // ── Send via fetch — intercepted by Playwright context.route ─────────────
-    // Fixed fake hostname works on any page, including about:blank
-    fetch('http://prabala.spy/capture', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locator: loc, tag: tag, text: txt }),
-    }).catch(function() {});
+  // Fallback path for pages that block mousedown handling.
+  document.addEventListener('click', function(e) {
+    var el = pickElementFromEvent(e);
+    if (!el) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    captureElement(el);
+  }, true);
 
-    // Fallback: also try __prabalaSendLocator if available (exposeFunction)
-    if (typeof window.__prabalaSendLocator === 'function') {
-      window.__prabalaSendLocator(loc, tag, txt);
-    }
-
-    // Green success banner
-    ban.style.cssText =
-      'position:fixed!important;z-index:2147483645!important;pointer-events:none!important;' +
-      'top:10px!important;left:50%!important;transform:translateX(-50%)!important;' +
-      'background:#14532d!important;color:#bbf7d0!important;font:600 13px system-ui!important;' +
-      'padding:8px 18px!important;border-radius:20px!important;border:1px solid #22c55e!important;';
-    ban.textContent = '\\u2705 Captured \\u2014 you can close this window';
-    tip.style.display = 'none';
+  // Secondary fallback: right-click capture is useful when left-click is swallowed.
+  document.addEventListener('contextmenu', function(e) {
+    var el = pickElementFromEvent(e);
+    if (!el) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    captureElement(el);
   }, true);
 })();
 `;
@@ -155,10 +349,11 @@ async function run() {
   const context = await browser.newContext({ viewport: null, bypassCSP: true });
 
   // ── Capture: route interception (network-level, no CDP binding) ─────────────
-  // The spy UI calls fetch('http://prabala.spy/capture'). Playwright intercepts
+  // The spy UI calls fetch('https://prabala.spy/capture'). Playwright intercepts
   // it here before any DNS lookup — works regardless of page origin or CSP.
+  // We intercept both http and https to handle all target page protocols.
   let captured = false;
-  await context.route('http://prabala.spy/**', async (route) => {
+  async function handleCapture(route) {
     if (captured) { await route.fulfill({ status: 200, body: 'ok' }); return; }
     try {
       const raw = route.request().postData();
@@ -170,7 +365,9 @@ async function run() {
     }
     await route.fulfill({ status: 200, body: 'ok' });
     // Parent process (server/electron main) will kill us via SIGTERM in ~300ms
-  });
+  }
+  await context.route('https://prabala.spy/**', handleCapture);
+  await context.route('http://prabala.spy/**', handleCapture);
 
   // ── addInitScript: ONLY the locator strategy (pure JS, zero DOM access) ─────
   // SPY_UI is injected later via page.on('domcontentloaded') where body exists.

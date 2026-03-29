@@ -5,6 +5,8 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+type SpyMode = 'web' | 'sap' | 'desktop' | 'mobile';
+
 contextBridge.exposeInMainWorld('prabala', {
   // ── File system ─────────────────────────────────────────────────────────────
   fs: {
@@ -70,10 +72,13 @@ contextBridge.exposeInMainWorld('prabala', {
   },
   // ── Element Spy ──────────────────────────────────────────────────────────────
   spy: {
-    start: (url: string) => ipcRenderer.invoke('spy:start', url),
+    start: (url: string, mode?: SpyMode) => ipcRenderer.invoke('spy:start', url, mode ?? 'web'),
     stop: () => ipcRenderer.invoke('spy:stop'),
     onLocator: (cb: (result: { locator: string; tag: string; text: string }) => void) => {
       ipcRenderer.on('spy:locator', (_e, result) => cb(result));
+    },
+    onError: (cb: (message: string) => void) => {
+      ipcRenderer.on('spy:error', (_e, message) => cb(String(message)));
     },
     onDone: (cb: () => void) => {
       ipcRenderer.once('spy:done', () => cb());
@@ -81,6 +86,7 @@ contextBridge.exposeInMainWorld('prabala', {
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('spy:locator');
       ipcRenderer.removeAllListeners('spy:done');
+      ipcRenderer.removeAllListeners('spy:error');
     },
   },
   // ── App ──────────────────────────────────────────────────────────────────────
@@ -151,9 +157,10 @@ declare global {
         removeAllListeners(): void;
       };
       spy: {
-        start(url: string): Promise<void>;
+        start(url: string, mode?: SpyMode): Promise<void>;
         stop(): Promise<void>;
         onLocator(cb: (result: { locator: string; tag: string; text: string }) => void): void;
+        onError(cb: (message: string) => void): void;
         onDone(cb: () => void): void;
         removeAllListeners(): void;
       };

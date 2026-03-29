@@ -4,7 +4,7 @@ import { loadProjectData } from '../utils/projectLoader'
 import {
   Play, Square, RefreshCw, CheckCircle2, XCircle, Clock,
   Terminal, FileText, AlertCircle, Loader2,
-  CheckSquare, Square as SquareIcon, Minus
+  CheckSquare, Square as SquareIcon, Minus, Copy, ClipboardCheck
 } from 'lucide-react'
 import TestExplorer from '../components/TestExplorer'
 import api from '../lib/api'
@@ -18,6 +18,16 @@ export default function ExecutionMonitorPage() {
   const [screenshot, setScreenshot] = useState('onFailure')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rescanning, setRescanning] = useState(false)
+  const [copied, setCopied] = useState<'all' | 'errors' | null>(null)
+
+  function copyLogs(filter: 'all' | 'errors') {
+    const lines = filter === 'errors'
+      ? run.logs.filter(l => l.type === 'stderr' || l.text.includes('✘') || /\bFAIL\b/.test(l.text) || /Error/i.test(l.text))
+      : run.logs
+    navigator.clipboard.writeText(lines.map(l => l.text).join(''))
+    setCopied(filter)
+    setTimeout(() => setCopied(null), 2000)
+  }
 
   // Auto-select all when test cases load/change
   useEffect(() => {
@@ -261,13 +271,31 @@ export default function ExecutionMonitorPage() {
             >
               Clear
             </button>
+            {run.logs.length > 0 && (
+              <>
+                <button
+                  onClick={() => copyLogs('errors')}
+                  className="text-xs text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1"
+                >
+                  {copied === 'errors' ? <ClipboardCheck size={11} /> : <Copy size={11} />}
+                  {copied === 'errors' ? 'Copied!' : 'Copy Errors'}
+                </button>
+                <button
+                  onClick={() => copyLogs('all')}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
+                >
+                  {copied === 'all' ? <ClipboardCheck size={11} /> : <Copy size={11} />}
+                  {copied === 'all' ? 'Copied!' : 'Copy All'}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Terminal */}
         <div
           ref={logRef}
-          className="flex-1 overflow-y-auto bg-surface-900 px-5 py-4 font-mono text-xs leading-relaxed"
+          className="flex-1 overflow-y-auto bg-surface-900 px-5 py-4 font-mono text-xs leading-relaxed select-text"
         >
           {run.logs.length === 0 && run.status === 'idle' ? (
             <div className="flex flex-col items-center justify-center h-full text-center gap-3">

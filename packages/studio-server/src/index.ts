@@ -173,8 +173,11 @@ app.post('/api/runner/run', (req: Request, res: Response) => {
       runnerProcess.kill()
       runnerProcess = null
     }
-    const args = ['prabala', 'run', pattern, ...extraArgs]
-    runnerProcess = spawn('npx', args, { cwd: projectDir, shell: true })
+    const cliPath = path.resolve(__dirname, '../../cli/dist/index.js')
+    runnerProcess = spawn('node', [cliPath, 'run', pattern, ...extraArgs], {
+      cwd: projectDir,
+      env: { ...process.env },
+    })
 
     runnerProcess.stdout?.on('data', (d: Buffer) => {
       broadcast('runner:stdout', d.toString())
@@ -265,14 +268,28 @@ app.post('/api/recorder/stop', (_req: Request, res: Response) => {
 
 app.post('/api/spy/start', (req: Request, res: Response) => {
   try {
-    const { url } = req.body as { url: string }
+    const { url, mode = 'web' } = req.body as { url: string; mode?: 'web' | 'sap' | 'desktop' | 'mobile' }
     if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
 
-    const spyScript = path.resolve(__dirname, '../../../studio/electron/spy.cjs')
+    const electronDir = path.resolve(__dirname, '../../../studio/electron')
     const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
 
-    spyProcess = spawn('node', [spyScript, url || 'about:blank'], {
-      cwd: process.cwd(),
+    let spyScript: string
+    let spyArgs: string[]
+
+    if (mode === 'sap') {
+      spyScript = path.join(electronDir, 'sap-spy.cjs')
+      spyArgs   = []
+    } else if (mode === 'desktop' || mode === 'mobile') {
+      spyScript = path.join(electronDir, 'desktop-spy.cjs')
+      spyArgs   = [url || 'http://localhost:4723', mode]
+    } else {
+      spyScript = path.join(electronDir, 'spy.cjs')
+      spyArgs   = [url || 'about:blank']
+    }
+
+    spyProcess = spawn('node', [spyScript, ...spyArgs], {
+      cwd: electronDir,
       env: { ...process.env, NODE_PATH: monoRepoNodeModules },
     })
 
@@ -283,11 +300,11 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
           const obj = JSON.parse(line)
           if (obj.__done) {
             broadcast('spy:done', null)
+          } else if (obj.__error) {
+            broadcast('spy:error', obj.__error)
           } else {
-            // Broadcast the locator to all WS clients
+            console.log('[Spy] broadcasting locator to', wsClients.size, 'clients:', JSON.stringify(obj))
             broadcast('spy:locator', obj)  // { locator, tag, text }
-            // NOW kill the spy process — stdout is already written/flushed
-            // so there is no race between emit() and process exit
             setTimeout(() => {
               if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
             }, 300)
@@ -327,13 +344,92 @@ let aiConfig: Record<string, string> = {
   apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2024-02-01',
 }
 
+function sanitizeAzureEndpoint(input: string): string {
+  return input
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/openai$/i, '')
+}
+
+function normalizeAiConfig(raw: Record<string, unknown>): Record<string, string> {
+  const next = { ...aiConfig }
+  const endpoint = String(raw.endpoint ?? '').trim()
+  const deployment = String(raw.deployment ?? '').trim()
+  const apiVersion = String(raw.apiVersion ?? '').trim()
+  const apiKeyInput = String(raw.apiKey ?? '').trim()
+
+  if (endpoint) next.endpoint = endpoint
+  if (deployment) next.deployment = deployment
+  if (apiVersion) next.apiVersion = apiVersion
+
+  // Ignore masked placeholders sent back from UI while editing other fields.
+  if (apiKeyInput && apiKeyInput !== '***') next.apiKey = apiKeyInput
+
+  return next
+}
+
 app.get('/api/ai/config', (_req: Request, res: Response) => {
-  res.json({ ...aiConfig, apiKey: aiConfig.apiKey ? '***' : '' })
+  res.json({ ...aiConfig })
 })
 
 app.post('/api/ai/config', (req: Request, res: Response) => {
-  aiConfig = { ...aiConfig, ...req.body }
+  aiConfig = normalizeAiConfig(req.body as Record<string, unknown>)
   res.json({ ok: true })
+})
+
+app.post('/api/ai/test', async (_req: Request, res: Response) => {
+  try {
+    const endpoint = sanitizeAzureEndpoint(aiConfig.endpoint)
+    const deployment = aiConfig.deployment.trim()
+    const apiVersion = (aiConfig.apiVersion || '2024-08-01-preview').trim()
+
+    if (!aiConfig.apiKey) {
+      res.status(400).json({ ok: false, message: 'API Key is missing.' })
+      return
+    }
+    if (!endpoint) {
+      res.status(400).json({ ok: false, message: 'Endpoint URL is missing.' })
+      return
+    }
+    if (!deployment) {
+      res.status(400).json({ ok: false, message: 'Deployment Name is missing.' })
+      return
+    }
+
+    const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`
+    const payload = {
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 5,
+    }
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': aiConfig.apiKey },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (!r.ok) {
+      const body = await r.text()
+      const guidance = r.status === 404
+        ? `\n\nCheck these values:\n- Endpoint should look like https://YOUR-RESOURCE.openai.azure.com\n- Deployment must exactly match Azure AI Foundry deployment name\n- Do not include /openai/deployments in endpoint` : ''
+      res.status(r.status).json({
+        ok: false,
+        message: `Azure OpenAI test failed (${r.status}): ${body}${guidance}`,
+      })
+      return
+    }
+
+    res.json({ ok: true, message: 'Connection successful!' })
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      res.status(408).json({ ok: false, message: 'Connection timed out after 15 seconds. Check endpoint URL, VPN/proxy/firewall, and network access to Azure OpenAI.' })
+      return
+    }
+    res.status(500).json({ ok: false, message: err.message })
+  }
 })
 
 app.post('/api/ai/chat', async (req: Request, res: Response) => {
@@ -367,18 +463,36 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'AI not configured. Set endpoint + apiKey.' })
       return
     }
-    const url = `${aiConfig.endpoint}/openai/deployments/${aiConfig.deployment}/chat/completions?api-version=${aiConfig.apiVersion}`
+    const endpoint = sanitizeAzureEndpoint(aiConfig.endpoint)
+    const deployment = aiConfig.deployment.trim()
+    const apiVersion = (aiConfig.apiVersion || '2024-08-01-preview').trim()
+    const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`
     const payload = {
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
     }
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': aiConfig.apiKey },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     })
+    clearTimeout(timeoutId)
+    if (!r.ok) {
+      const body = await r.text()
+      const guidance = r.status === 404
+        ? `\n\nCheck endpoint/deployment. Endpoint should be only the resource URL (no /openai path).` : ''
+      res.status(r.status).json({ error: `Azure OpenAI request failed (${r.status}): ${body}${guidance}` })
+      return
+    }
     const data = await r.json() as { choices?: { message?: { content?: string } }[] }
     res.json({ text: data.choices?.[0]?.message?.content ?? '' })
   } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      res.status(408).json({ error: 'Azure OpenAI request timed out after 30 seconds.' })
+      return
+    }
     res.status(500).json({ error: err.message })
   }
 })

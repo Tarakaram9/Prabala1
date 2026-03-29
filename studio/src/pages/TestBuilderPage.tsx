@@ -272,8 +272,10 @@ export default function TestBuilderPage() {
   // ─ Spy state ────────────────────────────────────────────────────────────
   const [spyTarget, setSpyTarget] = useState<{ stepId: string; key: string } | null>(null)
   const [spyAnchor, setSpyAnchor] = useState<{ stepId: string; key: string } | null>(null)
+  const [spyMode, setSpyMode] = useState<'web' | 'sap' | 'desktop' | 'mobile'>('web')
   const [spyUrl, setSpyUrl] = useState('')
   const [isSpying, setIsSpying] = useState(false)
+  const [spyError, setSpyError] = useState<string | null>(null)
 
   // Cmd+S / Ctrl+S shortcut
   useEffect(() => {
@@ -353,13 +355,26 @@ export default function TestBuilderPage() {
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
   function startSpy(stepId: string, key: string) {
-    if (!spyUrl.trim()) return
+    if (spyMode === 'web' && !spyUrl.trim()) return
     setSpyAnchor(null)
+    setSpyError(null)
     setSpyTarget({ stepId, key })
     setIsSpying(true)
     api.spy.removeAllListeners()
     api.spy.onLocator(({ locator }) => {
-      updateParam(stepId, key, locator)
+      // Read fresh state to avoid stale-closure issue (spy callback fires
+      // seconds later, after user interacts with the spy browser)
+      const { activeTestCase: atc, updateTestCase: utc } = useAppStore.getState()
+      if (atc) {
+        const step = atc.steps.find(s => s.id === stepId)
+        if (step) {
+          utc(atc.id, {
+            steps: atc.steps.map(s =>
+              s.id === stepId ? { ...s, params: { ...s.params, [key]: locator } } : s
+            ),
+          })
+        }
+      }
       setSpyTarget(null)
       setIsSpying(false)
       api.spy.removeAllListeners()
@@ -369,7 +384,10 @@ export default function TestBuilderPage() {
       setIsSpying(false)
       api.spy.removeAllListeners()
     })
-    api.spy.start(spyUrl)
+    api.spy.onError((message: string) => {
+      setSpyError(message)
+    })
+    api.spy.start(spyUrl, spyMode)
   }
 
   function stopSpy() {
@@ -377,6 +395,7 @@ export default function TestBuilderPage() {
     api.spy.removeAllListeners()
     setSpyTarget(null)
     setIsSpying(false)
+    setSpyError(null)
   }
 
   // Append a recorded step into the active test case via atomic store update
@@ -1189,6 +1208,7 @@ steps:
                                     if (isSpyingThisField) return
                                     setSpyAnchor(prev => prev?.stepId === step.id && prev?.key === key ? null : { stepId: step.id, key })
                                     setSpyUrl(prev => prev || recordUrl)
+                                    setSpyError(null)
                                     setObjectPicker(null)
                                     setParamPicker(null)
                                   }}
@@ -1247,25 +1267,71 @@ steps:
                                     {isSpying && <span className="ml-auto text-[10px] text-violet-400 animate-pulse">Active…</span>}
                                   </div>
                                   <div className="p-3 space-y-2">
-                                    <input
-                                      autoFocus
-                                      className="input text-xs font-mono w-full"
-                                      placeholder="https://example.com"
-                                      value={spyUrl}
-                                      onChange={e => setSpyUrl(e.target.value)}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') startSpy(step.id, key)
-                                        if (e.key === 'Escape') setSpyAnchor(null)
-                                      }}
-                                    />
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <select
+                                        className="input text-xs"
+                                        value={spyMode}
+                                        onChange={e => {
+                                          setSpyMode(e.target.value as 'web' | 'sap' | 'desktop' | 'mobile')
+                                          setSpyError(null)
+                                        }}
+                                      >
+                                        <option value="web">Web</option>
+                                        <option value="sap">SAP</option>
+                                        <option value="desktop">Desktop</option>
+                                        <option value="mobile">Mobile</option>
+                                      </select>
+                                      {spyMode !== 'sap' && (
+                                        <input
+                                          autoFocus
+                                          className="input text-xs font-mono w-full"
+                                          placeholder={
+                                            spyMode === 'web' ? 'https://example.com' :
+                                            'http://localhost:4723 (Appium URL)'
+                                          }
+                                          value={spyUrl}
+                                          onChange={e => setSpyUrl(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') startSpy(step.id, key)
+                                            if (e.key === 'Escape') setSpyAnchor(null)
+                                          }}
+                                        />
+                                      )}
+                                      {spyMode === 'sap' && (
+                                        <span className="input text-xs font-mono w-full opacity-40 cursor-not-allowed flex items-center">
+                                          Connects to running SAP GUI
+                                        </span>
+                                      )}
+                                    </div>
+                                    {spyMode === 'desktop' && (
+                                      <p className="text-[10px] text-slate-400 leading-relaxed bg-surface-700/40 border border-surface-600 rounded px-2 py-1.5">
+                                        Connects to Appium and shows the live accessibility tree of your desktop app. Start Appium and launch your app first.
+                                      </p>
+                                    )}
+                                    {spyMode === 'mobile' && (
+                                      <p className="text-[10px] text-slate-400 leading-relaxed bg-surface-700/40 border border-surface-600 rounded px-2 py-1.5">
+                                        Connects to Appium and shows the live UI tree of your Android or iOS app. Start Appium and launch your app first.
+                                      </p>
+                                    )}
+                                    {spyMode === 'sap' && (
+                                      <p className="text-[10px] text-slate-400 leading-relaxed bg-surface-700/40 border border-surface-600 rounded px-2 py-1.5">
+                                        Connects to the running SAP GUI session via COM Scripting. Open SAP GUI and navigate to a screen first. Windows only.
+                                      </p>
+                                    )}
+                                    {spyError && (
+                                      <p className="text-[10px] text-red-300 leading-relaxed bg-red-900/20 border border-red-700/40 rounded px-2 py-1.5">
+                                        {spyError}
+                                      </p>
+                                    )}
                                     <div className="flex gap-2">
                                       <button
                                         type="button"
                                         onClick={() => startSpy(step.id, key)}
-                                        disabled={!spyUrl.trim()}
+                                        disabled={spyMode === 'web' && !spyUrl.trim()}
                                         className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
                                       >
-                                        <Crosshair size={11} /> Open Spy Browser
+                                        <Crosshair size={11} />
+                                        {spyMode === 'sap' ? 'Connect to SAP GUI' : 'Open Spy Browser'}
                                       </button>
                                       <button type="button" onClick={() => setSpyAnchor(null)} className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 border border-surface-500 rounded-lg">Cancel</button>
                                     </div>

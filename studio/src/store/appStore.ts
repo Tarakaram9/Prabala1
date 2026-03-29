@@ -178,16 +178,15 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  // Auth — restore from localStorage so session survives refresh
-  currentUser: (() => {
-    try { const u = localStorage.getItem('prabala_user'); return u ? JSON.parse(u) : null } catch { return null }
-  })(),
+  // Auth — always start logged out so Login page is shown on every launch
+  currentUser: null,
   loginError: null,
   login: (username, password) => {
     if (USERS[username] && USERS[username] === password) {
       const user: AuthUser = { username }
       localStorage.setItem('prabala_user', JSON.stringify(user))
-      set({ currentUser: user, loginError: null })
+      localStorage.removeItem('prabala_workspace')
+      set({ currentUser: user, loginError: null, workspace: null, projectDir: null })
       return true
     }
     set({ loginError: 'Invalid username or password' })
@@ -195,13 +194,12 @@ export const useAppStore = create<AppState>((set) => ({
   },
   logout: () => {
     localStorage.removeItem('prabala_user')
-    set({ currentUser: null, loginError: null })
+    localStorage.removeItem('prabala_workspace')
+    set({ currentUser: null, loginError: null, workspace: null, projectDir: null })
   },
 
-  // Workspace — restore from localStorage
-  workspace: (() => {
-    try { const w = localStorage.getItem('prabala_workspace'); return w ? JSON.parse(w) : null } catch { return null }
-  })(),
+  // Workspace — always start with no workspace so the picker is shown after login
+  workspace: null,
   recentWorkspaces: (() => {
     try { const r = localStorage.getItem('prabala_recent_ws'); return r ? JSON.parse(r) : [] } catch { return [] }
   })(),

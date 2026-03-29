@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE = '/api'
+type SpyMode = 'web' | 'sap' | 'desktop' | 'mobile'
 
 // ── WebSocket singleton ───────────────────────────────────────────────────────
 type WsCallback = (payload: unknown) => void
@@ -67,6 +68,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (!r.ok) {
+    let message = `HTTP ${r.status}`
+    try {
+      const data = await r.json() as { error?: string; message?: string }
+      message = data.error || data.message || message
+    } catch {
+      // ignore JSON parse errors and keep fallback message
+    }
+    throw new Error(message)
+  }
   return r.json() as Promise<T>
 }
 
@@ -172,9 +183,9 @@ const api = {
   },
 
   spy: {
-    async start(url: string): Promise<void> {
+    async start(url: string, mode: SpyMode = 'web'): Promise<void> {
       getWs()
-      await post('/spy/start', { url })
+      await post('/spy/start', { url, mode })
     },
     async stop(): Promise<void> {
       await post('/spy/stop', {})
@@ -185,8 +196,11 @@ const api = {
     onDone(cb: () => void): void {
       wsOn('spy:done', () => cb())
     },
+    onError(cb: (message: string) => void): void {
+      wsOn('spy:error', (p) => cb(String(p)))
+    },
     removeAllListeners(): void {
-      wsOffAll(['spy:locator', 'spy:done'])
+      wsOffAll(['spy:locator', 'spy:done', 'spy:error'])
     },
   },
 
@@ -223,20 +237,16 @@ const api = {
     },
     async testConnection(): Promise<{ ok: boolean; message: string }> {
       try {
-        const r = await post<{ text: string }>('/ai/chat', {
-          messages: [{ role: 'user', content: 'ping' }],
-          systemPrompt: 'Reply "pong"',
-        })
-        return { ok: true, message: r.text }
+        return await post<{ ok: boolean; message: string }>('/ai/test', {})
       } catch (err: any) {
-        return { ok: false, message: err.message }
+        return { ok: false, message: err?.message || 'Connection test failed.' }
       }
     },
     async chat(
       messages: { role: 'user' | 'assistant'; content: string }[],
       systemPrompt: string
     ): Promise<{ text: string }> {
-      return post('/ai/chat', { messages, systemPrompt })
+      return post('/ai/chat', { messages, systemPrompt, provider: 'azure' })
     },
     async abort(): Promise<void> { /* no-op for non-streaming */ },
     onChunk(_cb: (token: string) => void): void { /* streaming not yet impl */ },
@@ -248,5 +258,7 @@ const api = {
   _wsOff: wsOff,
 }
 
-export default api
+const electronBridge = typeof window !== 'undefined' ? (window as Window & { prabala?: PrabalaApi }).prabala : undefined
+
+export default (electronBridge ?? api)
 export type PrabalaApi = typeof api

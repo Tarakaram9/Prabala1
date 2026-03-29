@@ -280,16 +280,71 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (ipc?.ai) {
-      ipc.ai.getConfig().then((c: typeof cfg) => { setCfg(c); setLoading(false) })
+      ipc.ai.getConfig()
+        .then((c: typeof cfg) => { setCfg(c); setLoading(false) })
+        .catch(() => setLoading(false))
     } else {
       setLoading(false)
     }
   }, [])
 
+  function normalizeEndpoint(raw: string): string {
+    let endpoint = raw.trim()
+    endpoint = endpoint.replace(/\/$/, '')
+    endpoint = endpoint.replace(/\/openai$/i, '')
+    return endpoint
+  }
+
+  function validateConfig(): string | null {
+    const endpoint = normalizeEndpoint(cfg.endpoint)
+    const apiKey = cfg.apiKey.trim()
+    const deployment = cfg.deployment.trim()
+    const apiVersion = cfg.apiVersion.trim()
+
+    if (!endpoint) return 'Endpoint URL is required.'
+    if (!apiKey) return 'API Key is required.'
+    if (!deployment) return 'Deployment Name is required.'
+    if (!apiVersion) return 'API Version is required.'
+
+    let parsed: URL
+    try {
+      parsed = new URL(endpoint)
+    } catch {
+      return 'Endpoint must be a valid URL, e.g. https://my-resource.openai.azure.com'
+    }
+
+    if (parsed.protocol !== 'https:') {
+      return 'Endpoint must start with https://'
+    }
+
+    if (!parsed.hostname.endsWith('.openai.azure.com')) {
+      return 'Endpoint host must end with .openai.azure.com'
+    }
+
+    if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname !== '') {
+      return 'Endpoint must be the base resource URL only (no path). Example: https://my-resource.openai.azure.com'
+    }
+
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(deployment)) {
+      return 'Deployment Name contains invalid characters. Use letters, numbers, dot, underscore, or hyphen.'
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}(-preview)?$/.test(apiVersion)) {
+      return 'API Version must look like YYYY-MM-DD or YYYY-MM-DD-preview (example: 2024-08-01-preview).'
+    }
+
+    return null
+  }
+
   async function handleSave() {
     if (!ipc?.ai) return
+    const validationError = validateConfig()
+    if (validationError) {
+      setTestResult({ ok: false, message: validationError })
+      return
+    }
     await ipc.ai.setConfig({
-      endpoint:   cfg.endpoint.trim(),
+      endpoint:   normalizeEndpoint(cfg.endpoint),
       apiKey:     cfg.apiKey.trim(),
       deployment: cfg.deployment.trim(),
       apiVersion: cfg.apiVersion.trim(),
@@ -300,18 +355,28 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function handleTest() {
     if (!ipc?.ai) return
+    const validationError = validateConfig()
+    if (validationError) {
+      setTestResult({ ok: false, message: validationError })
+      return
+    }
     setTesting(true)
     setTestResult(null)
-    // Save first so the handler reads the latest values
-    await ipc.ai.setConfig({
-      endpoint:   cfg.endpoint.trim(),
-      apiKey:     cfg.apiKey.trim(),
-      deployment: cfg.deployment.trim(),
-      apiVersion: cfg.apiVersion.trim(),
-    })
-    const result = await ipc.ai.testConnection()
-    setTestResult(result)
-    setTesting(false)
+    try {
+      // Save first so the handler reads the latest values
+      await ipc.ai.setConfig({
+        endpoint:   normalizeEndpoint(cfg.endpoint),
+        apiKey:     cfg.apiKey.trim(),
+        deployment: cfg.deployment.trim(),
+        apiVersion: cfg.apiVersion.trim(),
+      })
+      const result = await ipc.ai.testConnection()
+      setTestResult(result)
+    } catch (err: any) {
+      setTestResult({ ok: false, message: err?.message || 'Connection test failed.' })
+    } finally {
+      setTesting(false)
+    }
   }
 
   const canSave = !loading && !!cfg.endpoint.trim() && !!cfg.apiKey.trim() && !!cfg.deployment.trim()
@@ -360,7 +425,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         <Field label="Endpoint URL" value={cfg.endpoint}
           onChange={v => setCfg(p => ({ ...p, endpoint: v }))}
           placeholder="https://YOUR-RESOURCE-NAME.openai.azure.com/"
-          hint="Must end with a slash. Example: https://my-openai.openai.azure.com/"
+          hint="Use only the base resource URL (no /openai path). Example: https://my-openai.openai.azure.com"
         />
         <Field label="API Key" value={cfg.apiKey}
           onChange={v => setCfg(p => ({ ...p, apiKey: v }))}

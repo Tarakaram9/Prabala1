@@ -238,18 +238,33 @@ function registerIpcHandlers(): void {
   // ── Element Spy ───────────────────────────────────────────────────────────────
   let spyProcess: ReturnType<typeof spawn> | null = null;
 
-  ipcMain.handle('spy:start', (_e, url: string) => {
+  ipcMain.handle('spy:start', (_e, url: string, mode: 'web' | 'sap' | 'desktop' | 'mobile' = 'web') => {
     if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
 
-    const spyScript = isDev
-      ? path.join(__dirname, '..', 'electron', 'spy.cjs')
-      : path.join(__dirname, 'spy.cjs');
+    const electronDir = isDev
+      ? path.join(__dirname, '..', 'electron')
+      : __dirname;
+    const nodeModules = path.join(__dirname, '..', '..', 'node_modules');
 
-    spyProcess = spawn('node', [spyScript, url || 'about:blank'], {
+    let spyScript: string;
+    let spyArgs: string[];
+
+    if (mode === 'sap') {
+      spyScript = path.join(electronDir, 'sap-spy.cjs');
+      spyArgs   = [];
+    } else if (mode === 'desktop' || mode === 'mobile') {
+      spyScript = path.join(electronDir, 'desktop-spy.cjs');
+      spyArgs   = [url || 'http://localhost:4723', mode];
+    } else {
+      spyScript = path.join(electronDir, 'spy.cjs');
+      spyArgs   = [url || 'about:blank'];
+    }
+
+    spyProcess = spawn('node', [spyScript, ...spyArgs], {
       cwd: path.dirname(spyScript),
       env: {
         ...process.env,
-        NODE_PATH: path.join(__dirname, '..', '..', 'node_modules'),
+        NODE_PATH: nodeModules,
       },
     });
 
@@ -260,11 +275,10 @@ function registerIpcHandlers(): void {
           const obj = JSON.parse(line);
           if (obj.__done) {
             mainWindow?.webContents.send('spy:done');
+          } else if (obj.__error) {
+            mainWindow?.webContents.send('spy:error', obj.__error);
           } else {
-            // Send locator to renderer (stdout already flushed at this point)
             mainWindow?.webContents.send('spy:locator', obj); // { locator, tag, text }
-            // Kill spy process after a short delay so the confirmation overlay
-            // is visible briefly, then the browser closes cleanly
             setTimeout(() => {
               if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
             }, 300);
@@ -303,6 +317,13 @@ function registerIpcHandlers(): void {
 
   // ── Agentic AI ───────────────────────────────────────────────────────────────
   const AI_CONFIG_PATH = path.join(os.homedir(), '.prabala', 'ai.json');
+
+  function sanitizeAzureEndpoint(input: string): string {
+    return input
+      .trim()
+      .replace(/\/+$/, '')
+      .replace(/\/openai$/i, '');
+  }
 
   function readAiConfig(): Record<string, string> {
     try {
@@ -346,20 +367,23 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('ai:testConnection', async () => {
     const cfg = readAiConfig();
-    if (!cfg.apiKey)    return { ok: false, message: 'API Key is missing.' };
-    if (!cfg.endpoint)  return { ok: false, message: 'Endpoint URL is missing.' };
-    if (!cfg.deployment) return { ok: false, message: 'Deployment Name is missing.' };
+    const endpoint = sanitizeAzureEndpoint(cfg.endpoint || '');
+    const deployment = (cfg.deployment || '').trim();
+    if (!cfg.apiKey)     return { ok: false, message: 'API Key is missing.' };
+    if (!endpoint)       return { ok: false, message: 'Endpoint URL is missing.' };
+    if (!deployment)     return { ok: false, message: 'Deployment Name is missing.' };
 
     try {
       const client = new AzureOpenAI({
-        endpoint:   cfg.endpoint.trim(),
+        endpoint,
         apiKey:     cfg.apiKey.trim(),
-        deployment: cfg.deployment.trim(),
+        deployment,
         apiVersion: (cfg.apiVersion || '2024-08-01-preview').trim(),
+        timeout: 15000,
       });
       // Minimal non-streaming call to validate
       await client.chat.completions.create({
-        model: cfg.deployment.trim(),
+        model: deployment,
         max_tokens: 5,
         stream: false,
         messages: [{ role: 'user', content: 'ping' }],
@@ -369,13 +393,16 @@ function registerIpcHandlers(): void {
       const status = err?.status ?? err?.code;
       const body = err?.message ?? String(err);
       if (status === 404) {
-        return { ok: false, message: `404 Not Found — check your Endpoint URL and Deployment Name.\nEndpoint: ${cfg.endpoint}\nDeployment: ${cfg.deployment}\n\nMake sure the deployment name exactly matches what is shown in Azure AI Foundry.` };
+        return { ok: false, message: `404 Not Found — check your Endpoint URL and Deployment Name.\nEndpoint: ${endpoint}\nDeployment: ${deployment}\n\nEndpoint format should be: https://YOUR-RESOURCE.openai.azure.com\nDo not include /openai/deployments in endpoint.\nDeployment must exactly match Azure AI Foundry.` };
       }
       if (status === 401) {
         return { ok: false, message: '401 Unauthorized — the API Key is incorrect or expired.' };
       }
       if (status === 403) {
         return { ok: false, message: '403 Forbidden — this key does not have access to the resource.' };
+      }
+      if (err?.name === 'AbortError' || String(body).toLowerCase().includes('timeout')) {
+        return { ok: false, message: 'Connection timed out after 15 seconds. Check endpoint URL, VPN/proxy/firewall, and network access to Azure OpenAI.' };
       }
       return { ok: false, message: `Error ${status ?? ''}: ${body}` };
     }
@@ -387,15 +414,18 @@ function registerIpcHandlers(): void {
   ipcMain.handle('ai:chat',
     async (_e, messages: { role: 'user' | 'assistant'; content: string }[], systemPrompt: string) => {
       const cfg = readAiConfig();
+      const endpoint = sanitizeAzureEndpoint(cfg.endpoint || '');
+      const deployment = (cfg.deployment || '').trim();
       if (!cfg.apiKey)    throw new Error('No API key configured. Go to AI Settings to add your Azure OpenAI key.');
-      if (!cfg.endpoint)  throw new Error('No Azure endpoint configured. Go to AI Settings.');
-      if (!cfg.deployment) throw new Error('No deployment name configured. Go to AI Settings.');
+      if (!endpoint)      throw new Error('No Azure endpoint configured. Go to AI Settings.');
+      if (!deployment)    throw new Error('No deployment name configured. Go to AI Settings.');
 
       const client = new AzureOpenAI({
-        endpoint:   cfg.endpoint.trim(),
+        endpoint,
         apiKey:     cfg.apiKey.trim(),
-        deployment: cfg.deployment.trim(),
+        deployment,
         apiVersion: (cfg.apiVersion || '2024-08-01-preview').trim(),
+        timeout: 30000,
       });
 
       const controller = new AbortController();
@@ -404,7 +434,7 @@ function registerIpcHandlers(): void {
 
       try {
         const stream = await client.chat.completions.create({
-          model: cfg.deployment.trim(),
+          model: deployment,
           max_tokens: 4096,
           stream: true,
           messages: [
@@ -424,7 +454,7 @@ function registerIpcHandlers(): void {
         if (err.name !== 'AbortError' && err.name !== 'APIUserAbortError') {
           const status = err?.status ?? err?.code;
           if (status === 404) {
-            throw new Error(`404 Not Found — Endpoint or Deployment name is wrong.\nEndpoint: ${cfg.endpoint}\nDeployment: ${cfg.deployment}\n\nGo to Azure AI Foundry → Deployments and copy the exact deployment name.`);
+            throw new Error(`404 Not Found — Endpoint or Deployment name is wrong.\nEndpoint: ${endpoint}\nDeployment: ${deployment}\n\nEndpoint must be only the resource URL (no /openai path).\nGo to Azure AI Foundry → Deployments and copy the exact deployment name.`);
           }
           if (status === 401) throw new Error('401 Unauthorized — check your API Key in AI Settings.');
           throw err;
