@@ -1,7 +1,8 @@
 import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
-  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle, GitBranch
+  PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle, GitBranch,
+  LayoutDashboard, FileText, Wrench, CalendarClock
 } from 'lucide-react'
 import { LucideIcon } from 'lucide-react'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -11,18 +12,23 @@ interface NavItem {
   label: string
   icon: LucideIcon
   badge?: string
+  dividerAbove?: boolean
 }
 
 const navItems: NavItem[] = [
-  { id: 'builder',    label: 'Test Builder',    icon: FlaskConical },
-  { id: 'keywords',   label: 'Keywords',         icon: Library },
-  { id: 'objects',    label: 'Object Repository',icon: Database },
-  { id: 'components', label: 'Components',       icon: Puzzle,   badge: 'POM' },
-  { id: 'data',       label: 'Test Data',        icon: Table2 },
-  { id: 'monitor',    label: 'Run Tests',        icon: PlayCircle },
-  { id: 'report',     label: 'Reports',          icon: BarChart3 },
-  { id: 'ai',         label: 'AI Co-Pilot',      icon: Brain,    badge: 'NEW' },
-  { id: 'pipeline',   label: 'CI/CD Pipeline',   icon: GitBranch, badge: 'CI' },
+  { id: 'dashboard',        label: 'Dashboard',        icon: LayoutDashboard, badge: 'NEW' },
+  { id: 'builder',          label: 'Test Builder',     icon: FlaskConical, dividerAbove: true },
+  { id: 'keywords',         label: 'Keywords',         icon: Library },
+  { id: 'custom-keywords',  label: 'Custom Keywords',  icon: Wrench },
+  { id: 'objects',          label: 'Object Repository',icon: Database },
+  { id: 'components',       label: 'Components',       icon: Puzzle,   badge: 'POM' },
+  { id: 'data',             label: 'Test Data',        icon: Table2 },
+  { id: 'gherkin',          label: 'BDD / Gherkin',    icon: FileText, badge: 'BDD' },
+  { id: 'monitor',          label: 'Run Tests',        icon: PlayCircle, dividerAbove: true },
+  { id: 'report',           label: 'Reports',          icon: BarChart3 },
+  { id: 'scheduler',        label: 'Scheduler',        icon: CalendarClock, badge: 'CRON' },
+  { id: 'ai',               label: 'AI Co-Pilot',      icon: Brain,    badge: 'AI' },
+  { id: 'pipeline',         label: 'CI/CD Pipeline',   icon: GitBranch, badge: 'CI' },
 ]
 
 export default function Sidebar() {
@@ -60,8 +66,9 @@ export default function Sidebar() {
           const isRunning = item.id === 'monitor' && runStatus === 'running'
 
           return (
+            <div key={item.id}>
+              {item.dividerAbove && <div className="mx-2 my-1.5 border-t border-surface-600/60" />}
             <button
-              key={item.id}
               onClick={() => setActivePage(item.id)}
               className={`
                 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 text-left
@@ -80,6 +87,7 @@ export default function Sidebar() {
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-brand-600/40 text-brand-300 leading-none">{item.badge}</span>
               )}
             </button>
+            </div>
           )
         })}
       </nav>

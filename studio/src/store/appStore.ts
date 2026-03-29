@@ -4,7 +4,7 @@
 
 import { create } from 'zustand'
 
-export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline'
+export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline' | 'dashboard' | 'gherkin' | 'custom-keywords' | 'scheduler'
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -28,6 +28,10 @@ export interface TestStep {
   params: Record<string, string>
   description?: string
   continueOnFailure?: boolean
+  /** Skip this step without failing */
+  disabled?: boolean
+  /** Step-level retry count */
+  retries?: number
 }
 
 export interface TestCase {
@@ -38,6 +42,10 @@ export interface TestCase {
   description?: string
   steps: TestStep[]
   isDirty: boolean
+  /** Path to CSV/JSON data file for data-driven iteration */
+  dataSource?: string
+  /** Test-level retry count */
+  retries?: number
 }
 
 export interface LocatorFallback {
@@ -94,6 +102,27 @@ export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
   reporter: 'both',
   nodeVersion: '20',
   runCmd: '',
+}
+
+// Environment profiles
+export interface EnvProfile {
+  baseUrl?: string
+  env?: Record<string, string>
+  browser?: string
+  headless?: boolean
+  timeout?: number
+}
+
+// Scheduled run
+export interface ScheduledRun {
+  id: string
+  name: string
+  pattern: string
+  cron: string
+  enabled: boolean
+  profile?: string
+  lastRun?: string
+  lastStatus?: 'passed' | 'failed'
 }
 
 export interface RunLog {
@@ -175,6 +204,22 @@ interface AppState {
   // Pipeline settings
   pipelineSettings: PipelineSettings
   setPipelineSettings: (s: Partial<PipelineSettings>) => void
+
+  // Environment profiles
+  envProfiles: Record<string, EnvProfile>
+  activeProfile: string
+  setEnvProfiles: (profiles: Record<string, EnvProfile>) => void
+  setActiveProfile: (name: string) => void
+
+  // Scheduled runs
+  scheduledRuns: ScheduledRun[]
+  setScheduledRuns: (runs: ScheduledRun[]) => void
+  upsertScheduledRun: (run: ScheduledRun) => void
+  deleteScheduledRun: (id: string) => void
+
+  // Global search query
+  globalSearch: string
+  setGlobalSearch: (q: string) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -311,4 +356,23 @@ export const useAppStore = create<AppState>((set) => ({
   pipelineSettings: { ...DEFAULT_PIPELINE_SETTINGS },
   setPipelineSettings: (updates) =>
     set((s) => ({ pipelineSettings: { ...s.pipelineSettings, ...updates } })),
+
+  envProfiles: { dev: {}, staging: {}, prod: {} },
+  activeProfile: 'dev',
+  setEnvProfiles: (envProfiles) => set({ envProfiles }),
+  setActiveProfile: (activeProfile) => set({ activeProfile }),
+
+  scheduledRuns: [],
+  setScheduledRuns: (scheduledRuns) => set({ scheduledRuns }),
+  upsertScheduledRun: (run) =>
+    set((s) => ({
+      scheduledRuns: s.scheduledRuns.some((r) => r.id === run.id)
+        ? s.scheduledRuns.map((r) => (r.id === run.id ? run : r))
+        : [...s.scheduledRuns, run],
+    })),
+  deleteScheduledRun: (id) =>
+    set((s) => ({ scheduledRuns: s.scheduledRuns.filter((r) => r.id !== id) })),
+
+  globalSearch: '',
+  setGlobalSearch: (globalSearch) => set({ globalSearch }),
 }))

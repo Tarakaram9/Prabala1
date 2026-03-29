@@ -11,6 +11,10 @@ import AIPage from './pages/AIPage'
 import PipelinePage from './pages/PipelinePage'
 import LoginPage from './pages/LoginPage'
 import WorkspacePage from './pages/WorkspacePage'
+import DashboardPage from './pages/DashboardPage'
+import GherkinPage from './pages/GherkinPage'
+import CustomKeywordsPage from './pages/CustomKeywordsPage'
+import SchedulerPage from './pages/SchedulerPage'
 import { useAppStore } from './store/appStore'
 import { loadProjectData } from './utils/projectLoader'
 
@@ -32,15 +36,19 @@ export default function App() {
 
   // 3. Fully authenticated with workspace → show main Studio
   const page = {
-    builder:    <TestBuilderPage />,
-    keywords:   <KeywordLibraryPage />,
-    objects:    <ObjectRepositoryPage />,
-    components: <ComponentsPage />,
-    data:       <TestDataPage />,
-    monitor:    <ExecutionMonitorPage />,
-    report:     <ReportViewerPage />,
-    ai:         <AIPage />,
-    pipeline:   <PipelinePage />,
+    builder:          <TestBuilderPage />,
+    keywords:         <KeywordLibraryPage />,
+    objects:          <ObjectRepositoryPage />,
+    components:       <ComponentsPage />,
+    data:             <TestDataPage />,
+    monitor:          <ExecutionMonitorPage />,
+    report:           <ReportViewerPage />,
+    ai:               <AIPage />,
+    pipeline:         <PipelinePage />,
+    dashboard:        <DashboardPage />,
+    gherkin:          <GherkinPage />,
+    'custom-keywords': <CustomKeywordsPage />,
+    scheduler:        <SchedulerPage />,
   }[activePage]
 
   return <Layout>{page}</Layout>

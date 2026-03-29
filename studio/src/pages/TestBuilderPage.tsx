@@ -4,7 +4,8 @@ import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
-  X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle, Crosshair
+  X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle, Crosshair,
+  Eye, EyeOff, RefreshCw, RotateCcw
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -477,11 +478,15 @@ export default function TestBuilderPage() {
       testCase: tc.testCase,
       tags: tc.tags.length > 0 ? tc.tags : undefined,
       description: tc.description || undefined,
+      dataSource: tc.dataSource || undefined,
+      retries: tc.retries || undefined,
       steps: tc.steps.map(s => ({
         keyword: s.keyword,
         params: cleanParams(s.params),
         description: s.description || undefined,
         continueOnFailure: s.continueOnFailure || undefined,
+        disabled: s.disabled || undefined,
+        retries: s.retries || undefined,
       })),
     }, { lineWidth: 120, noRefs: true })
 
@@ -879,6 +884,29 @@ steps:
                     placeholder="Tags: smoke, regression..."
                   />
                 </div>
+                <div className="flex items-center gap-3 mt-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Database size={11} className="text-slate-600" />
+                    <input
+                      className="text-xs text-slate-500 bg-transparent outline-none w-40 border-b border-transparent hover:border-surface-500 focus:border-brand-500 transition-colors"
+                      value={tc.dataSource ?? ''}
+                      onChange={e => updateTestCase(tc.id, { dataSource: e.target.value })}
+                      placeholder="Data source: test-data/users.json"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RotateCcw size={11} className="text-slate-600" />
+                    <input
+                      type="number" min={0} max={5}
+                      className="text-xs text-slate-500 bg-transparent outline-none w-8 border-b border-transparent hover:border-surface-500 focus:border-brand-500 transition-colors text-center"
+                      value={tc.retries ?? ''}
+                      onChange={e => updateTestCase(tc.id, { retries: e.target.value ? parseInt(e.target.value) : undefined })}
+                      placeholder="0"
+                      title="Test-level retry count"
+                    />
+                    <span className="text-xs text-slate-600">retries</span>
+                  </div>
+                </div>
               </div>
               <div className="flex gap-2 flex-shrink-0 items-center">
                 <span className="text-xs text-slate-600">{tc.steps.length} step{tc.steps.length !== 1 ? 's' : ''}</span>
@@ -997,7 +1025,7 @@ steps:
                     onDragOver={e => onDragOver(e, idx)}
                     onDrop={() => onDrop(idx)}
                     onDragLeave={() => setDragOver(null)}
-                    className={`card border-l-4 ${statusColor(step.keyword)} transition-all ${isDragTarget ? 'ring-2 ring-brand-500/50 scale-[1.01]' : ''} ${stepWarnings[step.id] ? 'ring-1 ring-amber-500/40' : ''}`}
+                    className={`card border-l-4 ${statusColor(step.keyword)} transition-all ${isDragTarget ? 'ring-2 ring-brand-500/50 scale-[1.01]' : ''} ${stepWarnings[step.id] ? 'ring-1 ring-amber-500/40' : ''} ${step.disabled ? 'opacity-50' : ''}`}
                   >
                     {/* Step header */}
                     <div
@@ -1016,6 +1044,12 @@ steps:
                         </span>
                       )}
                       <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                        <button
+                          title={step.disabled ? 'Enable step' : 'Disable step (skip without failing)'}
+                          onClick={() => updateStep(step.id, { disabled: !step.disabled })}
+                          className={`p-1 rounded transition-colors ${step.disabled ? 'text-yellow-500 hover:text-yellow-300' : 'text-slate-600 hover:text-yellow-400 hover:bg-surface-500'}`}>
+                          {step.disabled ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
                         <button onClick={() => duplicateStep(step.id)} className="p-1 hover:bg-surface-500 rounded text-slate-500 hover:text-slate-300">
                           <Copy size={12} />
                         </button>
@@ -1403,15 +1437,38 @@ steps:
                           )
                         })
                         )}
-                        <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer mt-1">
-                          <input
-                            type="checkbox"
-                            checked={step.continueOnFailure ?? false}
-                            onChange={e => updateStep(step.id, { continueOnFailure: e.target.checked })}
-                            className="accent-brand-500"
-                          />
-                          Continue on failure
-                        </label>
+                        <div className="flex items-center gap-4 mt-1">
+                          <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={step.continueOnFailure ?? false}
+                              onChange={e => updateStep(step.id, { continueOnFailure: e.target.checked })}
+                              className="accent-brand-500"
+                            />
+                            Continue on failure
+                          </label>
+                          <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={step.disabled ?? false}
+                              onChange={e => updateStep(step.id, { disabled: e.target.checked })}
+                              className="accent-yellow-500"
+                            />
+                            Skip (disabled)
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <RotateCcw size={10} className="text-slate-600" />
+                            <input
+                              type="number" min={0} max={5}
+                              className="text-xs text-slate-500 bg-transparent outline-none w-6 border-b border-surface-500 focus:border-brand-500 text-center"
+                              value={step.retries ?? ''}
+                              onChange={e => updateStep(step.id, { retries: e.target.value ? parseInt(e.target.value) : undefined })}
+                              placeholder="0"
+                              title="Step-level retry count"
+                            />
+                            <span className="text-xs text-slate-600">retries</span>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

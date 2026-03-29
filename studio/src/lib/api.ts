@@ -256,6 +256,30 @@ const api = {
 
   // Internal helper — wsOff exposed for custom usage
   _wsOff: wsOff,
+
+  results: {
+    async get(): Promise<any> {
+      return get('/results/latest')
+    },
+  },
+
+  schedules: {
+    async list(): Promise<any[]> {
+      return get('/schedules')
+    },
+    async upsert(run: any): Promise<any> {
+      return post('/schedules', run)
+    },
+    async remove(id: string): Promise<void> {
+      await fetch(`${BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+  },
+
+  aiImpact: {
+    async analyze(changedFiles: string[], allTests: string[]): Promise<{ tests: string[]; reasoning: string }> {
+      return post('/ai/impact', { changedFiles, allTests })
+    },
+  },
 }
 
 const electronBridge = typeof window !== 'undefined' ? (window as Window & { prabala?: PrabalaApi }).prabala : undefined

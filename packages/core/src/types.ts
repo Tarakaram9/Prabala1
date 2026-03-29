@@ -7,6 +7,10 @@ export interface TestStep {
   params?: Record<string, string | number | boolean>;
   description?: string;
   continueOnFailure?: boolean;
+  /** Skip this step without failing the test */
+  disabled?: boolean;
+  /** Number of times to retry this step on failure (0 = no retry) */
+  retries?: number;
 }
 
 export interface TestCase {
@@ -14,6 +18,10 @@ export interface TestCase {
   tags?: string[];
   description?: string;
   steps: TestStep[];
+  /** Path to a JSON/YAML file with an array of row objects — runs the test once per row */
+  dataSource?: string;
+  /** Per-test retry count (overrides config.retries) */
+  retries?: number;
 }
 
 export interface TestSuite {
@@ -67,6 +75,8 @@ export interface StepResult {
   durationMs: number;
   error?: string;
   screenshot?: string;
+  /** How many retries were attempted before passing/failing */
+  retryCount?: number;
 }
 
 export interface TestResult {
@@ -74,6 +84,10 @@ export interface TestResult {
   status: 'passed' | 'failed' | 'skipped';
   durationMs: number;
   steps: StepResult[];
+  /** Data-driven: which row iteration this result belongs to (1-based) */
+  iteration?: number;
+  /** Total retries used at the test level */
+  retryCount?: number;
 }
 
 export interface SuiteResult {
@@ -107,6 +121,24 @@ export interface AiRepairConfig {
   autoUpdateRepo?: boolean;
 }
 
+/** Named environment profile — overrides root-level config fields when active */
+export interface EnvProfile {
+  baseUrl?: string;
+  env?: Record<string, string>;
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  headless?: boolean;
+  timeout?: number;
+}
+
+export interface ScheduledRun {
+  id: string;
+  pattern: string;
+  cron: string;
+  enabled: boolean;
+  lastRun?: string;
+  lastStatus?: 'passed' | 'failed';
+}
+
 export interface PrabalaConfig {
   baseUrl?: string;
   browser?: 'chromium' | 'firefox' | 'webkit';
@@ -115,11 +147,19 @@ export interface PrabalaConfig {
   objectRepositoryDir?: string;
   testDataDir?: string;
   outputDir?: string;
+  /** Run N tests in parallel (default 1 = serial) */
   parallel?: number;
+  /** Number of times to retry a failed test (default 0) */
   retries?: number;
   screenshotOnStep?: 'always' | 'onFailure' | 'never';
   keywordsDir?: string;
   env?: Record<string, string>;
+  /** Named environment profiles */
+  profiles?: Record<string, EnvProfile>;
+  /** Active profile name */
+  activeProfile?: string;
+  /** Directory to store visual regression baselines */
+  visualBaselineDir?: string;
   /** AI-powered locator self-healing — set to enable */
   aiRepair?: AiRepairConfig;
 }

@@ -525,6 +525,131 @@ app.post('/api/shell/open', (req: Request, res: Response) => {
   }
 })
 
+// ── /api/results ──────────────────────────────────────────────────────────────
+// Returns latest test results from the most recently written prabala-results.json
+// Searches: {projectDir}/artifacts/, then current working directory artifacts/.
+
+app.get('/api/results/latest', (req: Request, res: Response) => {
+  const projectDir = (req.query.projectDir as string) || process.cwd()
+  const candidates = [
+    path.join(projectDir, 'artifacts', 'prabala-results.json'),
+    path.join(process.cwd(), 'artifacts', 'prabala-results.json'),
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(candidate, 'utf-8'))
+        res.json(raw)
+        return
+      } catch { /* try next */ }
+    }
+  }
+  res.json({ suites: [], totalPassed: 0, totalFailed: 0, totalSkipped: 0, duration: 0 })
+})
+
+// ── /api/schedules ───────────────────────────────────────────────────────────
+// Persists scheduled runs in ~/.prabala/schedules.json
+
+const SCHEDULES_FILE = path.join(os.homedir(), '.prabala', 'schedules.json')
+
+function readSchedules(): any[] {
+  try {
+    fs.mkdirSync(path.dirname(SCHEDULES_FILE), { recursive: true })
+    if (fs.existsSync(SCHEDULES_FILE)) {
+      return JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf-8'))
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
+function writeSchedules(schedules: any[]) {
+  try {
+    fs.mkdirSync(path.dirname(SCHEDULES_FILE), { recursive: true })
+    fs.writeFileSync(SCHEDULES_FILE, JSON.stringify(schedules, null, 2), 'utf-8')
+  } catch { /* ignore */ }
+}
+
+app.get('/api/schedules', (_req: Request, res: Response) => {
+  res.json(readSchedules())
+})
+
+app.post('/api/schedules', (req: Request, res: Response) => {
+  try {
+    const run = req.body as { id: string; [key: string]: any }
+    if (!run?.id) { res.status(400).json({ error: 'id required' }); return }
+    const schedules = readSchedules()
+    const idx = schedules.findIndex((s) => s.id === run.id)
+    if (idx >= 0) schedules[idx] = run
+    else schedules.push(run)
+    writeSchedules(schedules)
+    res.json({ ok: true })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.delete('/api/schedules/:id', (req: Request, res: Response) => {
+  try {
+    const id = req.params.id
+    const schedules = readSchedules().filter((s) => s.id !== id)
+    writeSchedules(schedules)
+    res.json({ ok: true })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── /api/ai/impact ────────────────────────────────────────────────────────────
+// Lightweight test-impact analysis: given changed file paths, returns subset of
+// test files that likely reference those files (keyword match on file names).
+
+app.post('/api/ai/impact', (req: Request, res: Response) => {
+  try {
+    const { changedFiles = [], allTests = [] } = req.body as {
+      changedFiles: string[]
+      allTests: string[]
+    }
+    if (!changedFiles.length || !allTests.length) {
+      res.json({ impacted: allTests, reason: 'No changed files specified — returning all tests.' })
+      return
+    }
+    // Simple heuristic: a test is impacted if any changed file's basename appears
+    // in the test file content (or path)
+    const changedBaseNames = changedFiles.map((f) => path.basename(f, path.extname(f)).toLowerCase())
+    const impacted: string[] = []
+    for (const testFile of allTests) {
+      const testBasename = path.basename(testFile).toLowerCase()
+      if (changedBaseNames.some((cb) => testBasename.includes(cb))) {
+        impacted.push(testFile)
+        continue
+      }
+      if (fs.existsSync(testFile)) {
+        try {
+          const content = fs.readFileSync(testFile, 'utf-8').toLowerCase()
+          if (changedBaseNames.some((cb) => content.includes(cb))) {
+            impacted.push(testFile)
+          }
+        } catch { /* skip */ }
+      }
+    }
+    // If AI is configured, enhance with LLM analysis
+    const hasAI = !!(aiConfig.endpoint && aiConfig.apiKey)
+    if (!hasAI || impacted.length === 0) {
+      res.json({
+        impacted: impacted.length > 0 ? impacted : allTests,
+        reason: impacted.length > 0
+          ? `Found ${impacted.length} test(s) referencing changed files.`
+          : 'No keyword matches found — run all tests to be safe.',
+      })
+      return
+    }
+    // Return immediately with heuristic results; AI enrichment can be added via webhooks later
+    res.json({ impacted, reason: `${impacted.length} test(s) likely impacted by changed files.` })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Static React build ────────────────────────────────────────────────────────
 if (fs.existsSync(STUDIO_DIST)) {
   app.use(express.static(STUDIO_DIST))

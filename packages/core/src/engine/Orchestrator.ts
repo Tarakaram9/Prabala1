@@ -12,6 +12,7 @@ import {
   TestResult,
   ExecutionContext,
   ArtifactStore,
+  EnvProfile,
 } from '../types';
 import { TestParser } from '../parser/TestParser';
 import { TestEngine } from './TestEngine';
@@ -21,7 +22,23 @@ export class Orchestrator {
   private config: PrabalaConfig;
 
   constructor(config: PrabalaConfig) {
-    this.config = config;
+    // Apply active environment profile overrides
+    this.config = Orchestrator.applyProfile(config);
+  }
+
+  /** Merge the active named profile (if any) onto the base config. */
+  static applyProfile(config: PrabalaConfig): PrabalaConfig {
+    const profileName = config.activeProfile;
+    if (!profileName || !config.profiles?.[profileName]) return config;
+    const profile: EnvProfile = config.profiles[profileName];
+    return {
+      ...config,
+      baseUrl:   profile.baseUrl   ?? config.baseUrl,
+      browser:   profile.browser   ?? config.browser,
+      headless:  profile.headless  ?? config.headless,
+      timeout:   profile.timeout   ?? config.timeout,
+      env:       { ...(config.env ?? {}), ...(profile.env ?? {}) },
+    };
   }
 
   private buildContext(): ExecutionContext {
@@ -86,7 +103,11 @@ export class Orchestrator {
     const label = suiteName ?? `${files.length} test(s)`;
     console.log(chalk.bold.magenta('\n🔮 Prabala Test Runner\n'));
     console.log(chalk.gray(`  Suite   : ${label}`));
-    console.log(chalk.gray(`  Files   : ${files.length} test case(s)\n`));
+    console.log(chalk.gray(`  Files   : ${files.length} test case(s)`));
+    if (this.config.activeProfile) {
+      console.log(chalk.gray(`  Profile : ${this.config.activeProfile}`));
+    }
+    console.log();
 
     // Load user-defined custom keywords from keywordsDir
     const kwDir = this.config.keywordsDir;
@@ -110,18 +131,37 @@ export class Orchestrator {
     const startTime = new Date();
     const results: TestResult[] = [];
 
-    const context = this.buildContext();
-    const engine = new TestEngine(this.config, context);
+    const concurrency = Math.max(1, this.config.parallel ?? 1);
 
-    for (const file of files) {
-      const testCase = TestParser.parseTestCase(file);
-      const result = await engine.runTestCase(testCase);
-      results.push(result);
+    if (concurrency > 1) {
+      // ── Parallel execution ─────────────────────────────────────────────────
+      console.log(chalk.gray(`  Parallel : ${concurrency} workers\n`));
+      for (let i = 0; i < files.length; i += concurrency) {
+        const batch = files.slice(i, i + concurrency);
+        const batchResults = await Promise.all(
+          batch.map(async (file) => {
+            const context = this.buildContext();
+            const engine = new TestEngine(this.config, context);
+            const testCase = TestParser.parseTestCase(file);
+            return engine.runTestCase(testCase);
+          })
+        );
+        for (const r of batchResults) results.push(...r);
+      }
+    } else {
+      // ── Serial execution ───────────────────────────────────────────────────
+      const context = this.buildContext();
+      const engine = new TestEngine(this.config, context);
+      for (const file of files) {
+        const testCase = TestParser.parseTestCase(file);
+        const iterResults = await engine.runTestCase(testCase);
+        results.push(...iterResults);
+      }
     }
 
     const endTime = new Date();
-    const passed = results.filter((r) => r.status === 'passed').length;
-    const failed = results.filter((r) => r.status === 'failed').length;
+    const passed  = results.filter((r) => r.status === 'passed').length;
+    const failed  = results.filter((r) => r.status === 'failed').length;
     const skipped = results.filter((r) => r.status === 'skipped').length;
     const totalDurationMs = endTime.getTime() - startTime.getTime();
 
@@ -139,6 +179,7 @@ export class Orchestrator {
     this.printSummary(suiteResult);
 
     // Save JSON results
+    const context = this.buildContext();
     const reportPath = path.join(context.artifacts.outputDir, 'prabala-results.json');
     fs.writeFileSync(reportPath, JSON.stringify(suiteResult, null, 2));
     console.log(chalk.gray(`\n  Results saved to: ${reportPath}\n`));
@@ -157,5 +198,36 @@ export class Orchestrator {
     const overall = result.failed === 0 ? chalk.green('PASS') : chalk.red('FAIL');
     console.log(`  Status   : ${overall}`);
     console.log(chalk.bold('──────────────────────────────────────────\n'));
+  }
+}
+
+
+export class Orchestrator {
+  private config: PrabalaConfig;
+
+  constructor(config: PrabalaConfig) {
+    this.config = config;
+  }
+
+  private buildContext(): ExecutionContext {
+    const outputDir = this.config.outputDir ?? 'artifacts';
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const artifacts: ArtifactStore = {
+      outputDir,
+      screenshots: [],
+      videos: [],
+      traces: [],
+    };
+
+    // (stub — real context is built per-run above)
+
+    return {
+      variables: { BASE_URL: this.config.baseUrl ?? '', __config__: this.config as unknown },
+      objectRepository: {},
+      testData: {},
+      artifacts,
+      driverInstances: {},
+    };
   }
 }
