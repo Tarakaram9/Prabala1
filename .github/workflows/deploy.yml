@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prabala Studio — Build & Deploy to Azure Container Apps
+#
+# Required GitHub Secrets:
+#   AZURE_CREDENTIALS          — JSON output of: az ad sp create-for-rbac --sdk-auth
+#   REGISTRY_LOGIN_SERVER      — e.g. prabalastudio.azurecr.io
+#   REGISTRY_USERNAME          — ACR username
+#   REGISTRY_PASSWORD          — ACR password
+#   AZURE_RESOURCE_GROUP       — e.g. prabala-rg
+#   AZURE_CONTAINER_APP_NAME   — e.g. prabala-studio
+#   AZURE_CONTAINER_APP_ENV    — e.g. prabala-env
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build & Deploy to Azure
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: prabala-studio
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Azure login ───────────────────────────────────────────────────────
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ── 3. Log in to Azure Container Registry ────────────────────────────────
+      - name: ACR Login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # ── 4. Build & push Docker image ─────────────────────────────────────────
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=registry,ref=${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+
+      # ── 5. Deploy to Azure Container Apps ────────────────────────────────────
+      - name: Deploy to Container App
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          containerAppName: ${{ secrets.AZURE_CONTAINER_APP_NAME }}
+          containerAppEnvironment: ${{ secrets.AZURE_CONTAINER_APP_ENV }}
+          imageToDeploy: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          targetPort: 3000
+
+      # ── 6. Print URL ──────────────────────────────────────────────────────────
+      - name: Get App URL
+        run: |
+          URL=$(az containerapp show \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "✅ Prabala Studio deployed to: https://$URL"

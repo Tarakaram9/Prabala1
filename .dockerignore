@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+**/dist
+studio/dist
+.git
+.gitignore
+*.log
+artifacts
+test1
+test3
+test4
+tests
+test-data
+examples
+.DS_Store
