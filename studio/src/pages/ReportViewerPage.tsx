@@ -56,7 +56,10 @@ export default function ReportViewerPage() {
       const exists = await ipc.fs.exists(resultsPath)
       if (!exists) { setSuite(null); setError('No results found. Run your tests first.'); return }
       const raw = await ipc.fs.readFile(resultsPath)
-      setSuite(JSON.parse(raw) as SuiteResult)
+      const data = JSON.parse(raw) as SuiteResult & { endTime?: string }
+      if (!data.total) data.total = data.tests?.length ?? 0
+      if (!data.finishedAt && data.endTime) data.finishedAt = data.endTime
+      setSuite(data)
     } catch (err: any) {
       setError(err?.message ?? 'Failed to load results')
     } finally {
