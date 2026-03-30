@@ -53,7 +53,7 @@ export class ObjectRepository {
       strategy: entry.strategy,
       locator: entry.locator,
       description: entry.description ?? null,
-      fallback: entry.fallback ? JSON.stringify(entry.fallback) : null,
+      fallback: entry.fallbacks ? JSON.stringify(entry.fallbacks) : null,
       page: entry.page ?? null,
       tags: entry.tags ? JSON.stringify(entry.tags) : null,
     });
@@ -70,8 +70,8 @@ export class ObjectRepository {
       strategy: row['strategy'] as ObjectEntry['strategy'],
       locator: row['locator'] as string,
       description: row['description'] as string | undefined,
-      fallback: row['fallback']
-        ? (JSON.parse(row['fallback'] as string) as ObjectEntry['fallback'])
+      fallbacks: row['fallback']
+        ? (JSON.parse(row['fallback'] as string) as ObjectEntry['fallbacks'])
         : undefined,
     };
   }
@@ -90,7 +90,7 @@ export class ObjectRepository {
       strategy: row['strategy'] as ObjectEntry['strategy'],
       locator: row['locator'] as string,
       description: row['description'] as string | undefined,
-      fallback: row['fallback'] ? JSON.parse(row['fallback'] as string) : undefined,
+      fallbacks: row['fallback'] ? JSON.parse(row['fallback'] as string) : undefined,
     }));
   }
 
