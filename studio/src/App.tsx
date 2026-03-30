@@ -13,6 +13,7 @@ import LoginPage from './pages/LoginPage'
 import WorkspacePage from './pages/WorkspacePage'
 import DashboardPage from './pages/DashboardPage'
 import GherkinPage from './pages/GherkinPage'
+import RequirementsPage from './pages/RequirementsPage'
 import CustomKeywordsPage from './pages/CustomKeywordsPage'
 import SchedulerPage from './pages/SchedulerPage'
 import { useAppStore } from './store/appStore'
@@ -80,6 +81,7 @@ export default function App() {
     pipeline:         <PageErrorBoundary pageName="CI/CD Pipeline"><PipelinePage /></PageErrorBoundary>,
     dashboard:        <PageErrorBoundary pageName="Dashboard"><DashboardPage /></PageErrorBoundary>,
     gherkin:          <PageErrorBoundary pageName="BDD / Gherkin"><GherkinPage /></PageErrorBoundary>,
+    requirements:     <PageErrorBoundary pageName="Requirements"><RequirementsPage /></PageErrorBoundary>,
     'custom-keywords': <PageErrorBoundary pageName="Custom Keywords"><CustomKeywordsPage /></PageErrorBoundary>,
     scheduler:        <PageErrorBoundary pageName="Scheduler"><SchedulerPage /></PageErrorBoundary>,
   }[activePage]

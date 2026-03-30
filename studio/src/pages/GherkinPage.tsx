@@ -370,6 +370,24 @@ export default function GherkinPage() {
     return () => { cancelled = true }
   }, [projectDir])
 
+  // Pick up Gherkin generated from RequirementsPage and add it as a new feature
+  useEffect(() => {
+    const pending = sessionStorage.getItem('prabala_pending_gherkin')
+    const featureName = sessionStorage.getItem('prabala_pending_gherkin_feature') ?? 'Requirements'
+    if (!pending) return
+    sessionStorage.removeItem('prabala_pending_gherkin')
+    sessionStorage.removeItem('prabala_pending_gherkin_feature')
+    const parsed = parseFeatureFile(pending, '')
+    if (!parsed) return
+    const feature: GherkinFeature = { ...parsed, feature: featureName, isDirty: true }
+    setFeatures(fs => {
+      const exists = fs.some(f => f.feature === featureName && f.filePath === '')
+      return exists ? fs : [...fs, feature]
+    })
+    setActiveId(feature.id)
+    setExpandedScenarios(s => { const n = new Set(s); feature.scenarios.forEach(sc => n.add(sc.id)); return n })
+  }, [])
+
   const ipc = api
 
   function buildGherkinSystemPrompt(): string {

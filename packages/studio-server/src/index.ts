@@ -729,6 +729,49 @@ if (fs.existsSync(STUDIO_DIST)) {
   })
 }
 
+// ── /api/jira ─────────────────────────────────────────────────────────────────
+// Proxy to Jira REST API — keeps credentials server-side, avoids CORS issues.
+// Body: { baseUrl, email, apiToken, jql, maxResults? }
+
+app.post('/api/jira/issues', async (req: Request, res: Response) => {
+  try {
+    const { baseUrl, email, apiToken, jql, maxResults = 50 } = req.body as {
+      baseUrl: string; email: string; apiToken: string; jql: string; maxResults?: number
+    }
+    if (!baseUrl || !email || !apiToken || !jql) {
+      res.status(400).json({ error: 'baseUrl, email, apiToken and jql are required' }); return
+    }
+    // Validate baseUrl is an Atlassian domain to prevent SSRF
+    const host = baseUrl.replace(/^https?:\/\//, '').split('/')[0]
+    if (!host.endsWith('.atlassian.net')) {
+      res.status(400).json({ error: 'baseUrl must be an *.atlassian.net domain' }); return
+    }
+    const url = `https://${host}/rest/api/3/search`
+    const auth = Buffer.from(`${email}:${apiToken}`).toString('base64')
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        jql,
+        maxResults,
+        fields: ['summary', 'description', 'issuetype', 'status', 'assignee', 'priority'],
+      }),
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      res.status(response.status).json({ error: `Jira returned ${response.status}`, detail: text }); return
+    }
+    const data = await response.json() as { issues: any[] }
+    res.json(data)
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 httpServer.listen(PORT, () => {
   console.log(`\n  🔮 Prabala Studio Server`)

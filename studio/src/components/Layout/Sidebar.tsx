@@ -2,7 +2,7 @@ import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
   PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle, GitBranch,
-  LayoutDashboard, FileText, Wrench, CalendarClock
+  LayoutDashboard, FileText, Wrench, CalendarClock, ClipboardList
 } from 'lucide-react'
 import { LucideIcon } from 'lucide-react'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { id: 'components',       label: 'Components',       icon: Puzzle,   badge: 'POM' },
   { id: 'data',             label: 'Test Data',        icon: Table2 },
   { id: 'gherkin',          label: 'BDD / Gherkin',    icon: FileText, badge: 'BDD' },
+  { id: 'requirements',     label: 'Requirements',     icon: ClipboardList, badge: 'REQ' },
   { id: 'monitor',          label: 'Run Tests',        icon: PlayCircle, dividerAbove: true },
   { id: 'report',           label: 'Reports',          icon: BarChart3 },
   { id: 'scheduler',        label: 'Scheduler',        icon: CalendarClock, badge: 'CRON' },

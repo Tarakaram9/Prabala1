@@ -4,7 +4,27 @@
 
 import { create } from 'zustand'
 
-export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline' | 'dashboard' | 'gherkin' | 'custom-keywords' | 'scheduler'
+export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline' | 'dashboard' | 'gherkin' | 'custom-keywords' | 'scheduler' | 'requirements'
+
+// ── Jira ─────────────────────────────────────────────────────────────────────
+export interface JiraConfig {
+  baseUrl: string    // e.g. mycompany.atlassian.net
+  email: string
+  apiToken: string
+  projectKey: string
+  jql: string        // custom JQL filter
+}
+
+export interface Requirement {
+  id: string
+  key: string        // e.g. PROJ-123 or 'manual-<uuid>'
+  title: string
+  description: string
+  type: string       // Story | Bug | Epic | Task | Manual
+  status: string
+  source: 'jira' | 'manual' | 'import'
+  url?: string
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -222,6 +242,13 @@ interface AppState {
   // Global search query
   globalSearch: string
   setGlobalSearch: (q: string) => void
+
+  // Jira & Requirements
+  jiraConfig: JiraConfig
+  setJiraConfig: (cfg: Partial<JiraConfig>) => void
+  requirements: Requirement[]
+  setRequirements: (reqs: Requirement[]) => void
+  upsertRequirements: (reqs: Requirement[]) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -379,4 +406,22 @@ export const useAppStore = create<AppState>((set) => ({
 
   globalSearch: '',
   setGlobalSearch: (globalSearch) => set({ globalSearch }),
+
+  jiraConfig: (() => {
+    try { const s = localStorage.getItem('prabala_jira'); return s ? JSON.parse(s) : { baseUrl: '', email: '', apiToken: '', projectKey: '', jql: '' } } catch { return { baseUrl: '', email: '', apiToken: '', projectKey: '', jql: '' } }
+  })(),
+  setJiraConfig: (updates) =>
+    set((s) => {
+      const next = { ...s.jiraConfig, ...updates }
+      localStorage.setItem('prabala_jira', JSON.stringify({ ...next, apiToken: '' })) // don't persist token
+      return { jiraConfig: next }
+    }),
+  requirements: [],
+  setRequirements: (requirements) => set({ requirements }),
+  upsertRequirements: (incoming) =>
+    set((s) => {
+      const map = new Map(s.requirements.map(r => [r.key, r]))
+      incoming.forEach(r => map.set(r.key, r))
+      return { requirements: Array.from(map.values()) }
+    }),
 }))
