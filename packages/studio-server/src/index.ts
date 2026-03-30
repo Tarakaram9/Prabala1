@@ -16,7 +16,7 @@ const httpServer = createServer(app)
 const wss = new WebSocketServer({ noServer: true })
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10)
-const STUDIO_DIST = path.resolve(__dirname, '../../studio/dist')
+const STUDIO_DIST = path.resolve(__dirname, '../../../studio/dist')
 
 app.use(cors())
 app.use(express.json({ limit: '50mb' }))
