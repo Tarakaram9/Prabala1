@@ -505,7 +505,15 @@ export default function TestBuilderPage() {
 
     setSaveStatus('saving')
     try {
-      await ipc.fs.writeFile(tc.filePath, yamlContent)
+      // Tests created from BDD/Gherkin or other sources may have no filePath yet —
+      // auto-assign one under projectDir/tests/ before writing
+      let savePath = tc.filePath
+      if (!savePath) {
+        const slug = tc.testCase.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        savePath = `${projectDir}/tests/${slug}-${Date.now()}.yaml`
+        updateTestCase(tc.id, { filePath: savePath })
+      }
+      await ipc.fs.writeFile(savePath, yamlContent)
       markSaved(tc.id)
       setSaveStatus('ok')
     } catch (err: any) {
