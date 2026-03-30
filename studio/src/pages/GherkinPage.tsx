@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Plus, Save, Trash2, ChevronDown, ChevronRight, Copy, Zap, Loader2, HelpCircle } from 'lucide-react'
+import { FileText, Plus, Save, Trash2, ChevronDown, ChevronRight, Copy, Zap, Loader2, HelpCircle, Wand2, X } from 'lucide-react'
 import api from '../lib/api'
 import { useAppStore, TestCase, TestStep } from '../store/appStore'
 
@@ -330,6 +330,12 @@ export default function GherkinPage() {
   const [expandedScenarios, setExpandedScenarios] = useState<Set<string>>(new Set())
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // AI generation
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiStreaming, setAiStreaming] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const aiInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Load existing .feature files from disk whenever projectDir changes
   useEffect(() => {
@@ -363,6 +369,77 @@ export default function GherkinPage() {
     loadFeatures()
     return () => { cancelled = true }
   }, [projectDir])
+
+  const ipc = api
+
+  function buildGherkinSystemPrompt(): string {
+    const templates = STEP_MAPPINGS.map(m => `  - "${m.template}"  → ${m.keyword}`).join('\n')
+    return `You are a Gherkin scenario writer for the Prabala test automation framework.
+Generate a Gherkin scenario based on the user's description.
+
+OUTPUT FORMAT — return ONLY raw Gherkin, no markdown fences, no explanations:
+Scenario: <title>
+  Given <step>
+  When <step>
+  Then <step>
+  And <step>
+
+RULES:
+1. Use ONLY these exact step templates (fill in the quoted placeholders with real values):
+${templates}
+2. Start each line with Given / When / Then / And / But followed by a space and the step text.
+3. Use 2-space indentation for steps.
+4. Do NOT add any text before or after the scenario block.
+5. Do NOT use markdown code blocks.
+6. Keep it concise — 3 to 8 steps.`
+  }
+
+  function parseGherkinFromAI(text: string): GherkinScenario | null {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    const titleLine = lines.find(l => /^Scenario(?: Outline)?:/i.test(l))
+    const name = titleLine ? titleLine.replace(/^Scenario(?: Outline)?:\s*/i, '') : 'AI Generated Scenario'
+    const isOutline = /Scenario Outline:/i.test(titleLine ?? '')
+    const steps: GherkinStep[] = []
+    for (const line of lines) {
+      const m = line.match(/^(Given|When|Then|And|But)\s+(.+)/i)
+      if (m) {
+        const keyword = (m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()) as GherkinStep['keyword']
+        const stepText = m[2].trim()
+        const mapped = mapStep(stepText)
+        steps.push({ id: uid(), keyword, text: stepText, prabalaKeyword: mapped?.keyword, prabalaParams: mapped?.params })
+      }
+    }
+    if (steps.length === 0) return null
+    return { id: uid(), type: isOutline ? 'Scenario Outline' : 'Scenario', name, steps }
+  }
+
+  async function generateWithAI() {
+    const prompt = aiPrompt.trim()
+    if (!prompt || aiStreaming) return
+    if (!ipc?.ai) { setAiError('AI is not configured. Set your API key in Settings.'); return }
+    setAiError(null)
+    setAiStreaming(true)
+    let buffer = ''
+    ipc.ai.removeListeners?.()
+    ipc.ai.onChunk((token: string) => { buffer += token })
+    ipc.ai.onDone(() => {
+      setAiStreaming(false)
+      ipc.ai.removeListeners?.()
+      const scenario = parseGherkinFromAI(buffer)
+      if (!scenario) { setAiError('AI did not return a valid Gherkin scenario. Try rephrasing.'); return }
+      updateFeature(active.id, { scenarios: [...active.scenarios, scenario] })
+      setExpandedScenarios(s => { const n = new Set(s); n.add(scenario.id); return n })
+      setAiPrompt('')
+      setAiOpen(false)
+    })
+    try {
+      await ipc.ai.chat([{ role: 'user', content: prompt }], buildGherkinSystemPrompt())
+    } catch (err: any) {
+      setAiError(err?.message ?? 'AI request failed')
+      setAiStreaming(false)
+      ipc.ai.removeListeners?.()
+    }
+  }
 
   const active = features.find((f) => f.id === activeId) ?? features[0]
 
@@ -470,9 +547,46 @@ export default function GherkinPage() {
           </div>
           <div className="flex items-center gap-2">
             {saveMsg && <span className="text-xs text-green-400">{saveMsg}</span>}
+            <button onClick={() => { setAiOpen(o => !o); setAiError(null); setTimeout(() => aiInputRef.current?.focus(), 50) }}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                aiOpen ? 'bg-purple-600/30 border-purple-500/50 text-purple-300' : 'border-surface-500 text-slate-400 hover:text-purple-300 hover:border-purple-500/50'
+              }`}>
+              <Wand2 size={12}/> Generate with AI
+            </button>
             <button onClick={saveFeature} className="btn-primary text-xs flex items-center gap-1.5"><Save size={12}/> Save</button>
           </div>
         </div>
+
+        {/* AI generation panel */}
+        {aiOpen && (
+          <div className="flex-shrink-0 border-b border-surface-600 bg-purple-900/10 px-4 py-3">
+            <div className="flex items-start gap-2">
+              <div className="flex-1">
+                <p className="text-xs text-slate-400 mb-1.5">Describe the scenario you want to test in plain English:</p>
+                <textarea
+                  ref={aiInputRef}
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generateWithAI() }}
+                  rows={2}
+                  placeholder='e.g. "Login with valid credentials and verify the dashboard is shown"'
+                  className="w-full bg-surface-800 border border-surface-500 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-purple-500/60 resize-none"
+                />
+                {aiError && <p className="text-xs text-red-400 mt-1">{aiError}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5 flex-shrink-0 pt-5">
+                <button onClick={generateWithAI} disabled={aiStreaming || !aiPrompt.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-semibold transition-colors">
+                  {aiStreaming ? <><Loader2 size={12} className="animate-spin"/> Generating…</> : <><Wand2 size={12}/> Generate</>}
+                </button>
+                <button onClick={() => { setAiOpen(false); setAiError(null) }} className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-surface-500 text-slate-400 hover:text-slate-300 text-xs">
+                  <X size={11}/> Cancel
+                </button>
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-600 mt-1.5">Tip: ⌘+Enter to generate · AI will use only the available Prabala keyword templates</p>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {loading && (
