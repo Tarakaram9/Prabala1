@@ -200,34 +200,3 @@ export class Orchestrator {
     console.log(chalk.bold('──────────────────────────────────────────\n'));
   }
 }
-
-
-export class Orchestrator {
-  private config: PrabalaConfig;
-
-  constructor(config: PrabalaConfig) {
-    this.config = config;
-  }
-
-  private buildContext(): ExecutionContext {
-    const outputDir = this.config.outputDir ?? 'artifacts';
-    fs.mkdirSync(outputDir, { recursive: true });
-
-    const artifacts: ArtifactStore = {
-      outputDir,
-      screenshots: [],
-      videos: [],
-      traces: [],
-    };
-
-    // (stub — real context is built per-run above)
-
-    return {
-      variables: { BASE_URL: this.config.baseUrl ?? '', __config__: this.config as unknown },
-      objectRepository: {},
-      testData: {},
-      artifacts,
-      driverInstances: {},
-    };
-  }
-}

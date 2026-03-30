@@ -27,7 +27,7 @@ export class TestEngine {
         ? testCase.dataSource
         : path.resolve(this.config.testDataDir ?? '.', testCase.dataSource);
       try {
-        rows = TestParser.loadTestData(absPath) as Record<string, unknown>[];
+        rows = TestParser.loadTestData(absPath) as unknown as Record<string, unknown>[];
         if (!Array.isArray(rows)) rows = [rows];
       } catch (e) {
         console.warn(chalk.yellow(`  [DDT] Could not load dataSource "${testCase.dataSource}": ${(e as Error).message}`));
