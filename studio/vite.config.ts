@@ -18,7 +18,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: isWeb ? {
+    proxy: {
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
@@ -27,6 +27,6 @@ export default defineConfig({
         target: 'ws://localhost:3000',
         ws: true,
       },
-    } : undefined,
+    },
   },
 })

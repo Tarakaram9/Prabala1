@@ -163,6 +163,8 @@ interface AppState {
   // Test cases
   testCases: TestCase[]
   setTestCases: (cases: TestCase[]) => void
+  testFolders: string[]
+  setTestFolders: (folders: string[]) => void
   activeTestCase: TestCase | null
   setActiveTestCase: (tc: TestCase | null) => void
   updateTestCase: (id: string, updates: Partial<TestCase>) => void
@@ -269,6 +271,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   testCases: [],
   setTestCases: (testCases) => set({ testCases }),
+  testFolders: [],
+  setTestFolders: (testFolders) => set({ testFolders }),
   activeTestCase: null,
   setActiveTestCase: (tc) => set({ activeTestCase: tc }),
   updateTestCase: (id, updates) =>

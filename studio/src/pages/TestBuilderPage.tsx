@@ -29,7 +29,9 @@ interface AIChatMsg {
   autoAppliedCount?: number
 }
 
-function parseYamlToSteps(yamlText: string): Omit<TestStep, 'id'>[] | null {
+type ParsedAIStep = Omit<TestStep, 'id'> & { step_number?: number }
+
+function parseYamlToSteps(yamlText: string): ParsedAIStep[] | null {
   try {
     const doc = yaml.load(yamlText) as any
     const rawSteps: any[] = Array.isArray(doc) ? doc : (doc?.steps ?? null)
@@ -39,6 +41,7 @@ function parseYamlToSteps(yamlText: string): Omit<TestStep, 'id'>[] | null {
       params: s.params && typeof s.params === 'object' ? s.params : {},
       description: s.description ?? '',
       continueOnFailure: s.continueOnFailure ?? false,
+      step_number: typeof s.step_number === 'number' ? s.step_number : undefined,
     })).filter(s => s.keyword)
   } catch { return null }
 }
@@ -570,13 +573,14 @@ The user can click "Insert into Test" to inject those steps directly into their 
 - For web locators use CSS selectors (#id, .class) or XPath (//tag[@attr='val'])
 - Be concise — show the YAML then a brief 1-2 sentence explanation
 - If the user pastes a failure log, analyse it and suggest the fixed YAML steps
+- ALWAYS include \`step_number: N\` on every suggested step, where N is the 1-based position from the current context. When replacing an existing step use its step_number; when adding new steps after the last one, continue numbering from step count + 1.
 `
   }
 
   function buildContextMessage() {
     if (!tc) return ''
     const stepsYaml = tc.steps.length
-      ? yaml.dump({ steps: tc.steps.map(s => ({ keyword: s.keyword, params: s.params, description: s.description || undefined })) }, { lineWidth: 120 })
+      ? yaml.dump({ steps: tc.steps.map((s, i) => ({ step_number: i + 1, keyword: s.keyword, params: s.params, description: s.description || undefined })) }, { lineWidth: 120 })
       : '(no steps yet)'
     return `## Current Test: "${tc.testCase}"
 Tags: ${tc.tags.join(', ') || '(none)'}
@@ -648,6 +652,59 @@ ${stepsYaml}\`\`\``
     })
   }
 
+  /**
+   * Patch specific steps using step_number (1-based) from AI YAML.
+   * fallback='replace' → replaces all steps if no step_number present (Apply Fix)
+   * fallback='append'  → appends steps if no step_number present (Insert into Test)
+   */
+  function patchStepsFromYaml(yamlText: string, fallback: 'replace' | 'append' = 'replace'): number {
+    if (!tc) return 0
+    const parsed = parseYamlToSteps(yamlText)
+    if (!parsed || parsed.length === 0) return 0
+
+    const hasStepNumbers = parsed.some(s => s.step_number != null)
+
+    if (!hasStepNumbers) {
+      if (fallback === 'replace') return replaceStepsFromYaml(yamlText)
+      insertStepsFromYaml(yamlText)
+      return parsed.length
+    }
+
+    // Patch only the steps whose step_number was specified
+    const updatedSteps = [...tc.steps]
+    const expandIds: string[] = []
+    let patchedCount = 0
+
+    for (const aiStep of parsed) {
+      const { step_number, ...stepData } = aiStep
+      const idx = (step_number ?? 0) - 1 // 1-based → 0-based
+      const existingId = idx >= 0 && idx < updatedSteps.length ? updatedSteps[idx].id : crypto.randomUUID()
+      const newStep: TestStep = {
+        ...stepData,
+        id: existingId,
+        params: stepData.params as Record<string, string>,
+      }
+      if (idx >= 0 && idx < updatedSteps.length) {
+        updatedSteps[idx] = newStep
+      } else {
+        updatedSteps.push({ ...newStep, id: crypto.randomUUID() })
+      }
+      expandIds.push(newStep.id)
+      patchedCount++
+    }
+
+    if (patchedCount > 0) {
+      updateTestCase(tc.id, { steps: updatedSteps })
+      setExpandedSteps(prev => {
+        const next = new Set(prev)
+        expandIds.forEach(id => next.add(id))
+        return next
+      })
+      setStepWarnings({})
+    }
+    return patchedCount
+  }
+
   /** Replace (not append) the current test steps — called when user clicks Apply Fix */
   function replaceStepsFromYaml(yamlText: string): number {
     if (!tc) return 0
@@ -667,7 +724,7 @@ ${stepsYaml}\`\`\``
 
   /** Called when user clicks 'Apply Fix' on an Auto-Assist YAML block */
   function applyAIFix(msgId: string, yamlText: string) {
-    const applied = replaceStepsFromYaml(yamlText)
+    const applied = patchStepsFromYaml(yamlText, 'replace')
     if (applied > 0) {
       setAiMessages(prev => prev.map(m =>
         m.id === msgId ? { ...m, autoApplied: true, autoAppliedCount: applied } : m
@@ -735,10 +792,13 @@ ${Object.entries(KEYWORD_CATEGORIES).map(([cat, kws]) => `${cat}: ${kws.join(', 
 ## Format for corrected steps
 \`\`\`yaml
 steps:
-  - keyword: AssertVisible
+  - step_number: 4          # 1-based index of the step being replaced/added
+    keyword: AssertVisible
     params:
       locator: "#dashboard"
 \`\`\`
+
+- ALWAYS include \`step_number: N\` on every step (1-based from the context). This ensures only that specific step is updated in the builder — not the whole test.
 `
   }
 
@@ -751,7 +811,7 @@ steps:
     if (!currentTc) return
 
     const stepsYaml = currentTc.steps.length
-      ? yaml.dump({ steps: currentTc.steps.map(s => ({ keyword: s.keyword, params: s.params })) }, { lineWidth: 120 })
+      ? yaml.dump({ steps: currentTc.steps.map((s, i) => ({ step_number: i + 1, keyword: s.keyword, params: s.params })) }, { lineWidth: 120 })
       : '(no steps yet)'
 
     const assistantId = crypto.randomUUID()
@@ -1695,11 +1755,11 @@ steps:
                                   </button>
                                 )
                               ) : (
-                                // Manual message — Insert appends steps
+                                // Manual message — Insert patches by step_number or appends
                                 <button
                                   disabled={!tc}
-                                  onClick={() => insertStepsFromYaml(part.content)}
-                                  title="Append these steps to the current test"
+                                  onClick={() => patchStepsFromYaml(part.content, 'append')}
+                                  title="Insert steps into test (replaces step at step_number if present, otherwise appends)"
                                   className="flex items-center gap-1 px-2 py-0.5 rounded bg-brand-600/40 hover:bg-brand-600/70 border border-brand-500/50 text-brand-300 text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                   <Zap size={10} />

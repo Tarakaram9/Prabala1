@@ -19,6 +19,20 @@
   ::-webkit-scrollbar-track { background: #1a1a2e; }
   ::-webkit-scrollbar-thumb { background: #363660; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #4c4c80; }
+
+  /* Allow text selection inside any container that opts in */
+  .selectable,
+  .selectable * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    cursor: text;
+  }
+  /* Restore pointer cursor for clickable children inside .selectable */
+  .selectable button,
+  .selectable a,
+  .selectable [role="button"] {
+    cursor: pointer;
+  }
 }
 
 @layer components {

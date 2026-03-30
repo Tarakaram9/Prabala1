@@ -21,8 +21,9 @@ export async function loadProjectData(projectDir: string): Promise<void> {
 
   try {
     // Load test cases
-    const testCases = await loadTestCases(projectDir)
+    const { cases: testCases, folders: testFolders } = await loadTestCases(projectDir)
     useAppStore.getState().setTestCases(testCases)
+    useAppStore.getState().setTestFolders(testFolders)
     if (testCases.length > 0) {
       useAppStore.getState().setActiveTestCase(testCases[0])
     }
@@ -52,8 +53,10 @@ export async function loadProjectData(projectDir: string): Promise<void> {
 async function loadTestCases(projectDir: string): Promise<TestCase[]> {
   const testsDir = `${projectDir}/tests`
   const cases: TestCase[] = []
+  const folders: string[] = []
 
   async function scanDir(dir: string): Promise<void> {
+    folders.push(dir)
     const entries: { name: string; isDir: boolean; path: string }[] =
       await ipc.fs.readDir(dir)
     for (const entry of entries) {
@@ -87,7 +90,7 @@ async function loadTestCases(projectDir: string): Promise<TestCase[]> {
 
   const exists: boolean = await ipc.fs.exists(testsDir)
   if (exists) await scanDir(testsDir)
-  return cases
+  return { cases, folders }
 }
 
 async function loadObjectRepository(projectDir: string): Promise<ObjectEntry[]> {

@@ -336,13 +336,33 @@ app.post('/api/spy/stop', (_req: Request, res: Response) => {
 
 // ── /api/ai ───────────────────────────────────────────────────────────────────
 
-// AI config stored in memory (in prod, use a DB or env vars)
-let aiConfig: Record<string, string> = {
-  endpoint: process.env.AZURE_OPENAI_ENDPOINT ?? '',
-  apiKey: process.env.AZURE_OPENAI_KEY ?? '',
-  deployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? 'gpt-4o',
-  apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2024-02-01',
+const AI_CONFIG_FILE = path.join(os.homedir(), '.prabala', 'ai.json')
+
+function loadAiConfig(): Record<string, string> {
+  const defaults = {
+    endpoint: process.env.AZURE_OPENAI_ENDPOINT ?? '',
+    apiKey: process.env.AZURE_OPENAI_KEY ?? '',
+    deployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? 'gpt-4o',
+    apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2024-12-01-preview',
+  }
+  try {
+    fs.mkdirSync(path.dirname(AI_CONFIG_FILE), { recursive: true })
+    if (fs.existsSync(AI_CONFIG_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(AI_CONFIG_FILE, 'utf-8')) as Record<string, string>
+      return { ...defaults, ...saved }
+    }
+  } catch { /* ignore */ }
+  return defaults
 }
+
+function saveAiConfig(cfg: Record<string, string>): void {
+  try {
+    fs.mkdirSync(path.dirname(AI_CONFIG_FILE), { recursive: true })
+    fs.writeFileSync(AI_CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf-8')
+  } catch { /* ignore */ }
+}
+
+let aiConfig: Record<string, string> = loadAiConfig()
 
 function sanitizeAzureEndpoint(input: string): string {
   return input
@@ -374,6 +394,7 @@ app.get('/api/ai/config', (_req: Request, res: Response) => {
 
 app.post('/api/ai/config', (req: Request, res: Response) => {
   aiConfig = normalizeAiConfig(req.body as Record<string, unknown>)
+  saveAiConfig(aiConfig)
   res.json({ ok: true })
 })
 
@@ -381,7 +402,7 @@ app.post('/api/ai/test', async (_req: Request, res: Response) => {
   try {
     const endpoint = sanitizeAzureEndpoint(aiConfig.endpoint)
     const deployment = aiConfig.deployment.trim()
-    const apiVersion = (aiConfig.apiVersion || '2024-08-01-preview').trim()
+    const apiVersion = (aiConfig.apiVersion || '2024-12-01-preview').trim()
 
     if (!aiConfig.apiKey) {
       res.status(400).json({ ok: false, message: 'API Key is missing.' })
@@ -413,8 +434,16 @@ app.post('/api/ai/test', async (_req: Request, res: Response) => {
 
     if (!r.ok) {
       const body = await r.text()
-      const guidance = r.status === 404
-        ? `\n\nCheck these values:\n- Endpoint should look like https://YOUR-RESOURCE.openai.azure.com\n- Deployment must exactly match Azure AI Foundry deployment name\n- Do not include /openai/deployments in endpoint` : ''
+      let guidance = ''
+      if (r.status === 404) {
+        guidance = `\n\nCheck these values:\n- Endpoint should look like https://YOUR-RESOURCE.openai.azure.com\n- Deployment must exactly match Azure AI Foundry deployment name\n- Do not include /openai/deployments in endpoint`
+      } else if (r.status === 500) {
+        guidance = `\n\nHTTP 500 from Azure usually means:\n- API Version is incompatible with your model (try 2024-12-01-preview)\n- Deployment name doesn't match any deployed model\n- Temporary Azure service issue`
+      } else if (r.status === 401) {
+        guidance = `\n\nHTTP 401: API Key is invalid or expired. Check Keys and Endpoint in Azure Portal.`
+      } else if (r.status === 429) {
+        guidance = `\n\nHTTP 429: Rate limit or quota exceeded on this deployment.`
+      }
       res.status(r.status).json({
         ok: false,
         message: `Azure OpenAI test failed (${r.status}): ${body}${guidance}`,
@@ -422,7 +451,7 @@ app.post('/api/ai/test', async (_req: Request, res: Response) => {
       return
     }
 
-    res.json({ ok: true, message: 'Connection successful!' })
+    res.json({ ok: true, message: '✓ Connection successful! Azure OpenAI is properly configured.' })
   } catch (err: any) {
     if (err?.name === 'AbortError') {
       res.status(408).json({ ok: false, message: 'Connection timed out after 15 seconds. Check endpoint URL, VPN/proxy/firewall, and network access to Azure OpenAI.' })
@@ -454,11 +483,14 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
         body: JSON.stringify(body),
       })
       const data = await r.json() as { message?: { content?: string } }
-      res.json({ text: data.message?.content ?? '' })
+      const text = data.message?.content ?? ''
+      broadcast('ai:chunk', text)
+      broadcast('ai:done', null)
+      res.json({ ok: true })
       return
     }
 
-    // Azure OpenAI / OpenAI
+    // Azure OpenAI — streaming via WebSocket
     if (!aiConfig.endpoint || !aiConfig.apiKey) {
       res.status(400).json({ error: 'AI not configured. Set endpoint + apiKey.' })
       return
@@ -469,31 +501,66 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
     const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`
     const payload = {
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      stream: true,
+      max_tokens: 2048,
     }
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
+    // 2-minute timeout for streaming long responses
+    const timeoutId = setTimeout(() => controller.abort(), 120000)
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': aiConfig.apiKey },
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
-    clearTimeout(timeoutId)
     if (!r.ok) {
+      clearTimeout(timeoutId)
       const body = await r.text()
       const guidance = r.status === 404
         ? `\n\nCheck endpoint/deployment. Endpoint should be only the resource URL (no /openai path).` : ''
       res.status(r.status).json({ error: `Azure OpenAI request failed (${r.status}): ${body}${guidance}` })
       return
     }
-    const data = await r.json() as { choices?: { message?: { content?: string } }[] }
-    res.json({ text: data.choices?.[0]?.message?.content ?? '' })
+
+    // Acknowledge immediately — tokens arrive via WebSocket ai:chunk events
+    res.json({ ok: true })
+
+    // Stream SSE chunks in the background
+    ;(async () => {
+      const reader = r.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (data === '[DONE]') { broadcast('ai:done', null); return }
+            try {
+              const chunk = JSON.parse(data) as { choices?: { delta?: { content?: string } }[] }
+              const token = chunk.choices?.[0]?.delta?.content
+              if (token) broadcast('ai:chunk', token)
+            } catch { /* skip malformed SSE lines */ }
+          }
+        }
+      } finally {
+        clearTimeout(timeoutId)
+        broadcast('ai:done', null)
+      }
+    })()
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      res.status(408).json({ error: 'Azure OpenAI request timed out after 30 seconds.' })
+      broadcast('ai:done', null)
+      if (!res.headersSent) res.status(408).json({ error: 'AI request timed out.' })
       return
     }
-    res.status(500).json({ error: err.message })
+    broadcast('ai:done', null)
+    if (!res.headersSent) res.status(500).json({ error: err.message })
   }
 })
 

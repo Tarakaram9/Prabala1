@@ -268,11 +268,38 @@ const MODES: { id: Mode; label: string; icon: React.ElementType; placeholder: st
   },
 ]
 
+// ── Reusable field component (defined outside SettingsPanel to avoid remounts) ─
+
+function ConfigField({ label, value, onChange, onClearResult, placeholder, secret, hint, loading }: {
+  label: string; value: string; onChange: (v: string) => void; onClearResult: () => void
+  placeholder: string; secret?: boolean; hint?: string; loading: boolean
+}) {
+  return (
+    <div className="mb-3">
+      <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
+      <div className="relative">
+        <input
+          type={secret ? 'password' : 'text'}
+          value={loading ? '' : value}
+          onChange={e => { onChange(e.target.value); onClearResult() }}
+          placeholder={placeholder}
+          className="input w-full font-mono text-sm"
+          disabled={loading}
+        />
+        {loading && (
+          <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+        )}
+      </div>
+      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
+    </div>
+  )
+}
+
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const ipc = api
-  const [cfg, setCfg] = useState({ endpoint: '', apiKey: '', deployment: 'gpt-4o', apiVersion: '2024-08-01-preview' })
+  const [cfg, setCfg] = useState({ endpoint: '', apiKey: '', deployment: 'gpt-4o', apiVersion: '2024-12-01-preview' })
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [testing, setTesting] = useState(false)
@@ -281,7 +308,15 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (ipc?.ai) {
       ipc.ai.getConfig()
-        .then((c: typeof cfg) => { setCfg(c); setLoading(false) })
+        .then((c: any) => {
+          setCfg(prev => ({
+            endpoint:   String(c?.endpoint   ?? prev.endpoint   ?? ''),
+            apiKey:     String(c?.apiKey     ?? prev.apiKey     ?? ''),
+            deployment: String(c?.deployment ?? prev.deployment ?? 'gpt-4o'),
+            apiVersion: String(c?.apiVersion ?? prev.apiVersion ?? '2024-08-01-preview'),
+          }))
+          setLoading(false)
+        })
         .catch(() => setLoading(false))
     } else {
       setLoading(false)
@@ -296,10 +331,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   }
 
   function validateConfig(): string | null {
-    const endpoint = normalizeEndpoint(cfg.endpoint)
-    const apiKey = cfg.apiKey.trim()
-    const deployment = cfg.deployment.trim()
-    const apiVersion = cfg.apiVersion.trim()
+    const endpoint = normalizeEndpoint(cfg.endpoint ?? '')
+    const apiKey = (cfg.apiKey ?? '').trim()
+    const deployment = (cfg.deployment ?? '').trim()
+    const apiVersion = (cfg.apiVersion ?? '').trim()
 
     if (!endpoint) return 'Endpoint URL is required.'
     if (!apiKey) return 'API Key is required.'
@@ -344,10 +379,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       return
     }
     await ipc.ai.setConfig({
-      endpoint:   normalizeEndpoint(cfg.endpoint),
-      apiKey:     cfg.apiKey.trim(),
-      deployment: cfg.deployment.trim(),
-      apiVersion: cfg.apiVersion.trim(),
+      endpoint:   normalizeEndpoint(cfg.endpoint ?? ''),
+      apiKey:     (cfg.apiKey ?? '').trim(),
+      deployment: (cfg.deployment ?? '').trim(),
+      apiVersion: (cfg.apiVersion ?? '').trim(),
     })
     setSaved(true)
     setTimeout(() => { setSaved(false); onClose() }, 1200)
@@ -365,10 +400,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     try {
       // Save first so the handler reads the latest values
       await ipc.ai.setConfig({
-        endpoint:   normalizeEndpoint(cfg.endpoint),
-        apiKey:     cfg.apiKey.trim(),
-        deployment: cfg.deployment.trim(),
-        apiVersion: cfg.apiVersion.trim(),
+        endpoint:   normalizeEndpoint(cfg.endpoint ?? ''),
+        apiKey:     (cfg.apiKey ?? '').trim(),
+        deployment: (cfg.deployment ?? '').trim(),
+        apiVersion: (cfg.apiVersion ?? '').trim(),
       })
       const result = await ipc.ai.testConnection()
       setTestResult(result)
@@ -379,33 +414,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const canSave = !loading && !!cfg.endpoint.trim() && !!cfg.apiKey.trim() && !!cfg.deployment.trim()
-
-  const Field = ({ label, value, onChange, placeholder, secret, hint }: {
-    label: string; value: string; onChange: (v: string) => void
-    placeholder: string; secret?: boolean; hint?: string
-  }) => (
-    <div className="mb-3">
-      <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
-      <div className="relative">
-        <input
-          type={secret ? 'password' : 'text'}
-          value={loading ? '' : value}
-          onChange={e => { onChange(e.target.value); setTestResult(null) }}
-          placeholder={placeholder}
-          className="input w-full font-mono text-sm"
-          disabled={loading}
-        />
-        {loading && (
-          <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
-        )}
-      </div>
-      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
-    </div>
-  )
+  const canSave = !loading && !!(cfg.endpoint ?? '').trim() && !!(cfg.apiKey ?? '').trim() && !!(cfg.deployment ?? '').trim()
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-8">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] overflow-y-auto py-8">
       <div className="bg-surface-800 border border-surface-600 rounded-xl shadow-2xl w-[540px] p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -422,24 +434,32 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <p>Deployment name must exactly match what you see in <strong className="text-slate-300">Azure AI Foundry → Deployments</strong></p>
         </div>
 
-        <Field label="Endpoint URL" value={cfg.endpoint}
+        <ConfigField label="Endpoint URL" value={cfg.endpoint}
           onChange={v => setCfg(p => ({ ...p, endpoint: v }))}
+          onClearResult={() => setTestResult(null)}
           placeholder="https://YOUR-RESOURCE-NAME.openai.azure.com/"
           hint="Use only the base resource URL (no /openai path). Example: https://my-openai.openai.azure.com"
+          loading={loading}
         />
-        <Field label="API Key" value={cfg.apiKey}
+        <ConfigField label="API Key" value={cfg.apiKey}
           onChange={v => setCfg(p => ({ ...p, apiKey: v }))}
+          onClearResult={() => setTestResult(null)}
           placeholder="Paste key from Azure Portal → Keys and Endpoint" secret
+          loading={loading}
         />
-        <Field label="Deployment Name" value={cfg.deployment}
+        <ConfigField label="Deployment Name" value={cfg.deployment}
           onChange={v => setCfg(p => ({ ...p, deployment: v }))}
+          onClearResult={() => setTestResult(null)}
           placeholder="e.g. gpt-4o"
           hint="Exact name from Azure AI Foundry → Deployments (case-sensitive)"
+          loading={loading}
         />
-        <Field label="API Version" value={cfg.apiVersion}
+        <ConfigField label="API Version" value={cfg.apiVersion}
           onChange={v => setCfg(p => ({ ...p, apiVersion: v }))}
-          placeholder="2024-08-01-preview"
-          hint="Use 2024-08-01-preview or 2024-12-01-preview for GPT-4o"
+          onClearResult={() => setTestResult(null)}
+          placeholder="2024-12-01-preview"
+          hint="Recommended: 2025-01-01-preview (for gpt-4.1) or 2024-12-01-preview (for gpt-4o). Older versions cause HTTP 500."
+          loading={loading}
         />
 
         {/* Test result banner */}
@@ -545,8 +565,8 @@ export default function AIPage() {
   useEffect(() => {
     if (ipc?.ai) {
       ipc.ai.getConfig()
-        .then((c: { endpoint: string; apiKey: string; deployment: string; apiVersion: string }) =>
-          setHasKey(!!(c.endpoint?.trim() && c.apiKey?.trim() && c.deployment?.trim()))
+        .then((c: any) =>
+          setHasKey(!!(String(c?.endpoint ?? '').trim() && String(c?.apiKey ?? '').trim() && String(c?.deployment ?? '').trim()))
         )
         .catch(() => setHasKey(false))
     } else {
@@ -559,9 +579,10 @@ export default function AIPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Register chunk listener
+  // Register chunk listener — refreshed on mode change
   useEffect(() => {
     if (!ipc?.ai) return
+    ipc.ai.removeListeners()
     ipc.ai.onChunk((token: string) => {
       setMessages(prev => {
         const last = prev[prev.length - 1]
@@ -597,27 +618,33 @@ export default function AIPage() {
     const apiMessages = updatedMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
     const systemPrompt = buildSystemPrompt(mode, keywords, projectDir)
 
-    try {
-      await ipc.ai.chat(apiMessages, systemPrompt)
-    } catch (err: any) {
-      setError(err.message ?? 'Unknown error')
-      setMessages(prev => prev.slice(0, -1)) // remove empty assistant msg
-    } finally {
+    // Fresh listeners for this turn
+    ipc.ai.removeListeners()
+    ipc.ai.onChunk((token: string) => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        return prev.map((m, i) =>
+          i === prev.length - 1 ? { ...m, content: m.content + token, streaming: true } : m
+        )
+      })
+    })
+    ipc.ai.onDone(() => {
       setMessages(prev =>
         prev.map((m, i) => i === prev.length - 1 ? { ...m, streaming: false } : m)
       )
       setIsStreaming(false)
       ipc.ai.removeListeners()
-      // re-register for next turn
-      ipc.ai.onChunk((token: string) => {
-        setMessages(prev => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          return prev.map((m, i) =>
-            i === prev.length - 1 ? { ...m, content: m.content + token, streaming: true } : m
-          )
-        })
-      })
+    })
+
+    try {
+      await ipc.ai.chat(apiMessages, systemPrompt)
+      // chat() returns quickly with {ok:true}; tokens stream in via onChunk/onDone
+    } catch (err: any) {
+      setError(err.message ?? 'Unknown error')
+      setMessages(prev => prev.slice(0, -1)) // remove empty assistant msg
+      setIsStreaming(false)
+      ipc.ai.removeListeners()
     }
   }, [input, isStreaming, messages, mode, keywords, projectDir, ipc])
 
@@ -636,24 +663,24 @@ export default function AIPage() {
     }
   }
 
-  if (hasKey === null) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 size={24} className="animate-spin text-brand-400" />
-      </div>
-    )
+  function closeSettings() {
+    setShowSettings(false)
+    if (ipc?.ai) ipc.ai.getConfig()
+      .then((c: any) =>
+        setHasKey(!!(String(c?.endpoint ?? '').trim() && String(c?.apiKey ?? '').trim() && String(c?.deployment ?? '').trim()))
+      ).catch(() => {})
   }
 
   return (
-    <div className="h-full flex flex-col bg-surface-800">
+    <div className="h-full flex flex-col bg-surface-800 relative">
       {/* Settings Modal */}
-      {showSettings && (
-        <SettingsPanel onClose={() => {
-          setShowSettings(false)
-          if (ipc?.ai) ipc.ai.getConfig().then((c: any) =>
-            setHasKey(!!(c.endpoint?.trim() && c.apiKey?.trim() && c.deployment?.trim()))
-          )
-        }} />
+      {showSettings && <SettingsPanel onClose={closeSettings} />}
+
+      {/* Loading state */}
+      {hasKey === null && !showSettings && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <Loader2 size={24} className="animate-spin text-brand-400" />
+        </div>
       )}
 
       {/* Top bar */}
@@ -737,7 +764,7 @@ export default function AIPage() {
       )}
 
       {/* Body */}
-      {!hasKey ? (
+      {hasKey === false ? (
         <WelcomeScreen onSetKey={() => setShowSettings(true)} />
       ) : (
         <>

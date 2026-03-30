@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { TestCase } from '../store/appStore'
+import { TestCase, useAppStore } from '../store/appStore'
 import {
   Folder, FolderOpen, FileText, Plus, Trash2, Edit2, FolderPlus,
   RefreshCw, Loader2, ChevronRight, ChevronDown,
@@ -20,8 +20,9 @@ export interface FolderNode {
   tests: TestCase[]
 }
 
-/** Build a tree from a flat testCases array, rooted at testsRoot */
-export function buildTree(testCases: TestCase[], testsRoot: string): FolderNode {
+/** Build a tree from a flat testCases array, rooted at testsRoot.
+ *  extraFolders: additional directory paths (e.g. empty folders) to include */
+export function buildTree(testCases: TestCase[], testsRoot: string, extraFolders: string[] = []): FolderNode {
   const root: FolderNode = { name: 'tests', path: testsRoot, children: [], tests: [] }
   const map = new Map<string, FolderNode>([[testsRoot, root]])
 
@@ -34,6 +35,13 @@ export function buildTree(testCases: TestCase[], testsRoot: string): FolderNode 
     map.set(dirPath, node)
     parent.children.push(node)
     return node
+  }
+
+  // Ensure nodes exist for all discovered folders (including empty ones)
+  for (const folderPath of extraFolders) {
+    if (folderPath !== testsRoot && folderPath.startsWith(testsRoot)) {
+      getNode(folderPath)
+    }
   }
 
   for (const tc of testCases) {
@@ -98,9 +106,10 @@ type TestExplorerProps = BuilderProps | MonitorProps
 export default function TestExplorer(props: TestExplorerProps) {
   const { projectDir, testCases, onRescan, rescanning } = props
   const ipc = api
+  const testFolders = useAppStore(s => s.testFolders)
 
   const testsRoot = `${projectDir}/tests`
-  const tree = buildTree(testCases, testsRoot)
+  const tree = buildTree(testCases, testsRoot, testFolders)
   const allPaths = allFolderPaths(tree)
 
   // State

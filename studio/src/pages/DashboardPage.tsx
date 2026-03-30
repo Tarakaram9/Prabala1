@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
-import { BarChart3, TrendingUp, CheckCircle2, XCircle, SkipForward, Clock, RefreshCw, FolderOpen } from 'lucide-react'
+import { BarChart3, TrendingUp, CheckCircle2, XCircle, SkipForward, Clock, RefreshCw, FolderOpen, Copy } from 'lucide-react'
 import api from '../lib/api'
+import { useAppStore } from '../store/appStore'
 
 interface StepResult { keyword: string; status: string; durationMs: number; error?: string }
 interface TestResult { testCase: string; status: string; durationMs: number; steps: StepResult[]; iteration?: number }
@@ -10,6 +11,7 @@ interface SuiteResult {
 }
 
 export default function DashboardPage() {
+  const projectDir = useAppStore(s => s.projectDir)
   const [results, setResults] = useState<SuiteResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +19,7 @@ export default function DashboardPage() {
   async function loadResults() {
     setLoading(true); setError(null)
     try {
-      const data = await api.results.get()
+      const data = await api.results.get(projectDir ?? undefined)
       setResults(data)
     } catch (e: any) {
       setError(e.message ?? 'Failed to load results')
@@ -26,7 +28,7 @@ export default function DashboardPage() {
     }
   }
 
-  useEffect(() => { loadResults() }, [])
+  useEffect(() => { loadResults() }, [projectDir])
 
   const stats = useMemo(() => {
     if (!results) return null
@@ -79,7 +81,7 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 selectable">
         {error && (
           <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-4 text-sm text-red-300 flex items-center gap-2">
             <XCircle size={16} /> {error}
@@ -178,9 +180,18 @@ export default function DashboardPage() {
                           <span className="text-xs text-slate-500">{t.durationMs}ms</span>
                         </div>
                         {failedStep && (
-                          <p className="text-xs text-red-400 font-mono mt-1">
-                            ✘ {failedStep.keyword}: {failedStep.error}
-                          </p>
+                          <div className="flex items-start justify-between gap-2 mt-1 group">
+                                  <p className="text-xs text-red-400 font-mono break-all flex-1">
+                              ✘ {failedStep.keyword}: {failedStep.error}
+                            </p>
+                            <button
+                              title="Copy error"
+                              onClick={() => navigator.clipboard.writeText(`${failedStep.keyword}: ${failedStep.error ?? ''}`)}
+                              className="flex-shrink-0 p-1 rounded text-red-700 hover:text-red-300 hover:bg-red-900/40 opacity-0 group-hover:opacity-100 transition-all"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
                         )}
                       </div>
                     )
@@ -203,22 +214,47 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-surface-600">
-                    {results.tests.map((t, i) => (
-                      <tr key={i} className="hover:bg-surface-600/40">
-                        <td className="py-2 text-slate-300 truncate max-w-xs">{t.testCase}{t.iteration ? ` [row ${t.iteration}]` : ''}</td>
-                        <td className="py-2 text-center">
-                          {t.status === 'passed' ? (
-                            <span className="text-green-400 flex items-center justify-center gap-1"><CheckCircle2 size={11}/> passed</span>
-                          ) : t.status === 'failed' ? (
-                            <span className="text-red-400 flex items-center justify-center gap-1"><XCircle size={11}/> failed</span>
-                          ) : (
-                            <span className="text-yellow-400 flex items-center justify-center gap-1"><SkipForward size={11}/> skipped</span>
+                    {results.tests.map((t, i) => {
+                      const failedStep = t.status === 'failed' ? t.steps.find((s) => s.status === 'failed') : undefined
+                      return (
+                        <>
+                          <tr key={i} className="hover:bg-surface-600/40">
+                            <td className="py-2 text-slate-300 truncate max-w-xs">{t.testCase}{t.iteration ? ` [row ${t.iteration}]` : ''}</td>
+                            <td className="py-2 text-center">
+                              {t.status === 'passed' ? (
+                                <span className="text-green-400 flex items-center justify-center gap-1"><CheckCircle2 size={11}/> passed</span>
+                              ) : t.status === 'failed' ? (
+                                <span className="text-red-400 flex items-center justify-center gap-1"><XCircle size={11}/> failed</span>
+                              ) : (
+                                <span className="text-yellow-400 flex items-center justify-center gap-1"><SkipForward size={11}/> skipped</span>
+                              )}
+                            </td>
+                            <td className="py-2 text-right text-slate-400 font-mono">{t.durationMs}ms</td>
+                            <td className="py-2 text-right text-slate-500">{t.steps.length}</td>
+                          </tr>
+                          {failedStep?.error && (
+                            <tr key={`${i}-err`} className="bg-red-950/20">
+                              <td colSpan={4} className="pb-2 pt-0 px-2">
+                                <div className="flex items-start gap-2 group">
+                                  <span
+                                    className="text-[11px] text-red-400 font-mono break-all flex-1"
+                                  >
+                                    {failedStep.keyword}: {failedStep.error}
+                                  </span>
+                                  <button
+                                    title="Copy error"
+                                    onClick={() => navigator.clipboard.writeText(`${failedStep.keyword}: ${failedStep.error ?? ''}`)}
+                                    className="flex-shrink-0 p-0.5 rounded text-red-700 hover:text-red-300 hover:bg-red-900/40 opacity-0 group-hover:opacity-100 transition-all"
+                                  >
+                                    <Copy size={10} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                        <td className="py-2 text-right text-slate-400 font-mono">{t.durationMs}ms</td>
-                        <td className="py-2 text-right text-slate-500">{t.steps.length}</td>
-                      </tr>
-                    ))}
+                        </>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

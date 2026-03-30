@@ -16,7 +16,7 @@ let wsReady = false
 const wsQueue: string[] = []
 
 function getWs(): WebSocket {
-  if (ws && ws.readyState === WebSocket.OPEN) return ws
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return ws
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/prabala-ws`
   ws = new WebSocket(url)
@@ -245,12 +245,12 @@ const api = {
     async chat(
       messages: { role: 'user' | 'assistant'; content: string }[],
       systemPrompt: string
-    ): Promise<{ text: string }> {
+    ): Promise<{ ok: boolean }> {
       return post('/ai/chat', { messages, systemPrompt, provider: 'azure' })
     },
-    async abort(): Promise<void> { /* no-op for non-streaming */ },
-    onChunk(_cb: (token: string) => void): void { /* streaming not yet impl */ },
-    onDone(_cb: () => void): void { /* streaming not yet impl */ },
+    async abort(): Promise<void> { /* no-op — cancel via removeListeners */ },
+    onChunk(cb: (token: string) => void): void { wsOn('ai:chunk', (p) => cb(p as string)) },
+    onDone(cb: () => void): void { wsOn('ai:done', () => cb()) },
     removeListeners(): void { wsOffAll(['ai:chunk', 'ai:done']) },
   },
 
@@ -258,8 +258,9 @@ const api = {
   _wsOff: wsOff,
 
   results: {
-    async get(): Promise<any> {
-      return get('/results/latest')
+    async get(projectDir?: string): Promise<any> {
+      const params = projectDir ? { projectDir } : undefined
+      return get('/results/latest', params)
     },
   },
 
