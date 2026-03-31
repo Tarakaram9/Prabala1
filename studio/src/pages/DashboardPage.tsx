@@ -20,7 +20,12 @@ export default function DashboardPage() {
     setLoading(true); setError(null)
     try {
       const data = await api.results.get(projectDir ?? undefined)
-      setResults(data)
+      // Server returns { suites: [] } when no results file exists — treat as no data
+      if (!data || !Array.isArray(data.tests)) {
+        setResults(null)
+      } else {
+        setResults(data)
+      }
     } catch (e: any) {
       setError(e.message ?? 'Failed to load results')
     } finally {
@@ -32,17 +37,20 @@ export default function DashboardPage() {
 
   const stats = useMemo(() => {
     if (!results) return null
-    const total = results.tests.length
-    const passRate = total > 0 ? Math.round((results.passed / total) * 100) : 0
-    const avgDuration = total > 0 ? Math.round(results.tests.reduce((a, t) => a + t.durationMs, 0) / total) : 0
-    const slowest = [...results.tests].sort((a, b) => b.durationMs - a.durationMs).slice(0, 5)
-    const fastest = [...results.tests].sort((a, b) => a.durationMs - b.durationMs).slice(0, 5)
-    const failed = results.tests.filter((t) => t.status === 'failed')
+    const tests = Array.isArray(results.tests) ? results.tests : []
+    const total = tests.length
+    const passed = results.passed ?? 0
+    const failed = results.failed ?? 0
+    const passRate = total > 0 ? Math.round((passed / total) * 100) : 0
+    const avgDuration = total > 0 ? Math.round(tests.reduce((a, t) => a + (t.durationMs ?? 0), 0) / total) : 0
+    const slowest = [...tests].sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 5)
+    const fastest = [...tests].sort((a, b) => (a.durationMs ?? 0) - (b.durationMs ?? 0)).slice(0, 5)
+    const failedTests = tests.filter((t) => t.status === 'failed')
 
     // Step distribution
     const keywordCounts: Record<string, number> = {}
-    for (const t of results.tests) {
-      for (const s of t.steps) {
+    for (const t of tests) {
+      for (const s of (t.steps ?? [])) {
         keywordCounts[s.keyword] = (keywordCounts[s.keyword] ?? 0) + 1
       }
     }
@@ -51,7 +59,7 @@ export default function DashboardPage() {
       .slice(0, 8)
       .map(([kw, count]) => ({ kw, count }))
 
-    return { total, passRate, avgDuration, slowest, fastest, failed, topKeywords }
+    return { total, passRate, avgDuration, slowest, fastest, failed: failedTests, topKeywords }
   }, [results])
 
   const barMax = stats?.topKeywords[0]?.count ?? 1
@@ -103,23 +111,23 @@ export default function DashboardPage() {
               <KpiCard label="Pass Rate" value={`${stats.passRate}%`} color={stats.passRate >= 80 ? 'green' : stats.passRate >= 50 ? 'yellow' : 'red'} icon={<TrendingUp size={18}/>} />
               <KpiCard label="Tests Run" value={String(stats.total)} color="blue" icon={<BarChart3 size={18}/>} />
               <KpiCard label="Avg Duration" value={`${stats.avgDuration}ms`} color="purple" icon={<Clock size={18}/>} />
-              <KpiCard label="Failed" value={String(results.failed)} color={results.failed === 0 ? 'green' : 'red'} icon={<XCircle size={18}/>} />
+              <KpiCard label="Failed" value={String(stats.failed.length)} color={stats.failed.length === 0 ? 'green' : 'red'} icon={<XCircle size={18}/>} />
             </div>
 
             {/* Pass/Fail bar */}
             <div className="bg-surface-700 border border-surface-600 rounded-xl p-4">
               <h2 className="text-sm font-semibold text-slate-300 mb-3">Test Results Breakdown</h2>
               <div className="flex items-center gap-3 mb-2">
-                <span className="text-xs w-16 text-green-400 text-right">{results.passed} passed</span>
+                <span className="text-xs w-16 text-green-400 text-right">{results.passed ?? 0} passed</span>
                 <div className="flex-1 h-5 rounded-full bg-surface-600 overflow-hidden flex">
-                  {results.passed > 0 && (
-                    <div className="bg-green-500 h-full transition-all" style={{ width: `${(results.passed / stats.total) * 100}%` }} />
+                  {(results.passed ?? 0) > 0 && (
+                    <div className="bg-green-500 h-full transition-all" style={{ width: `${((results.passed ?? 0) / stats.total) * 100}%` }} />
                   )}
-                  {results.failed > 0 && (
-                    <div className="bg-red-500 h-full transition-all" style={{ width: `${(results.failed / stats.total) * 100}%` }} />
+                  {(results.failed ?? 0) > 0 && (
+                    <div className="bg-red-500 h-full transition-all" style={{ width: `${((results.failed ?? 0) / stats.total) * 100}%` }} />
                   )}
-                  {results.skipped > 0 && (
-                    <div className="bg-yellow-500 h-full transition-all" style={{ width: `${(results.skipped / stats.total) * 100}%` }} />
+                  {(results.skipped ?? 0) > 0 && (
+                    <div className="bg-yellow-500 h-full transition-all" style={{ width: `${((results.skipped ?? 0) / stats.total) * 100}%` }} />
                   )}
                 </div>
                 <span className="text-xs w-16 text-red-400">{results.failed} failed</span>
