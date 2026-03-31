@@ -93,6 +93,10 @@ RUN printf '#!/bin/sh\nXvfb :99 -screen 0 1280x1024x24 -ac +extension GLX &\nsle
 
 # Non-root user for security
 RUN useradd -m prabala
+
+# Dedicated writable directory for user workspaces (prabala cannot write to /app which is owned by root)
+RUN mkdir -p /workspaces && chown prabala:prabala /workspaces
+
 USER prabala
 
 ENV PORT=3000

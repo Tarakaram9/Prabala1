@@ -72,7 +72,7 @@ export default function FolderBrowserModal({ title = 'Select Folder', initialPat
           ? 'C:\\Users'
           : platform === 'darwin'
             ? '/Users'
-            : '/'
+            : '/workspaces'
         loadDir(home)
       }).catch(() => loadDir('/'))
     }

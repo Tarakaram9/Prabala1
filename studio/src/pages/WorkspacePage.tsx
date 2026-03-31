@@ -11,7 +11,7 @@ export default function WorkspacePage() {
   const { setWorkspace, recentWorkspaces, currentUser, logout } = useAppStore()
   const [creating, setCreating] = useState(false)
   const [wsName, setWsName] = useState('')
-  const [parentDir, setParentDir] = useState('')
+  const [parentDir, setParentDir] = useState('/workspaces')
   // 'open' = pick existing workspace root, 'create' = pick parent for new workspace
   const [showBrowser, setShowBrowser] = useState<'open' | 'create' | null>(null)
   const ipc = api
