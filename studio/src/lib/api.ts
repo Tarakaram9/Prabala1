@@ -182,8 +182,11 @@ const api = {
     onDone(cb: () => void): void {
       wsOn('recorder:done', () => cb())
     },
+    onError(cb: (msg: string) => void): void {
+      wsOn('recorder:error', (p) => cb((p as { message: string }).message ?? String(p)))
+    },
     removeAllListeners(): void {
-      wsOffAll(['recorder:step', 'recorder:done'])
+      wsOffAll(['recorder:step', 'recorder:done', 'recorder:error'])
     },
   },
 

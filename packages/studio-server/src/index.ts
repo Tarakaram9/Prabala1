@@ -209,6 +209,23 @@ app.post('/api/runner/stop', (_req: Request, res: Response) => {
 //   { "keyword": "Click", "params": { "locator": "..." } }
 //   { "__done": true }
 
+// Client-side recording: accept events POSTed from the user's own browser via
+// the injected recording bookmarklet script.
+app.options('/api/recorder/event', (_req: Request, res: Response) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Content-Type')
+  res.sendStatus(204)
+})
+app.post('/api/recorder/event', (req: Request, res: Response) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  const step = req.body as { keyword?: string; params?: Record<string, unknown> }
+  if (step?.keyword && step.keyword !== '__stop') {
+    broadcast('recorder:step', step)
+  }
+  res.json({ ok: true })
+})
+
 app.post('/api/recorder/start', (req: Request, res: Response) => {
   try {
     const { startUrl, projectDir } = req.body as { startUrl: string; projectDir: string }

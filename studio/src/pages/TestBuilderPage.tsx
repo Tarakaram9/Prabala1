@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAppStore, TestCase, TestStep, ComponentDef } from '../store/appStore'
 import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
-  ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
+  ChevronRight, FilePlus, Tag, Copy, Check, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
   X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle, Crosshair,
   Eye, EyeOff, RefreshCw, RotateCcw
@@ -271,6 +271,9 @@ export default function TestBuilderPage() {
   const [recorderBarOpen, setRecorderBarOpen] = useState(false)
   const [recordUrl, setRecordUrl] = useState('')
   const [recordedCount, setRecordedCount] = useState(0)
+  const [recordScript, setRecordScript] = useState('')
+  const [scriptCopied, setScriptCopied] = useState(false)
+  const [recorderError, setRecorderError] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
 
   // ─ Spy state ────────────────────────────────────────────────────────────
@@ -302,11 +305,37 @@ export default function TestBuilderPage() {
   }
 
   // ─ Recording ──────────────────────────────────────────────────────────────
+  function buildRecordingScript(studioOrigin: string, startUrl: string): string {
+    // Minified client-side recording script injected into the user's own browser.
+    // Records clicks/inputs/navigation and POSTs each step to /api/recorder/event.
+    const nav = startUrl ? `try{if(location.href!==${JSON.stringify(startUrl)}){location.href=${JSON.stringify(startUrl)};}}catch(e){}` : ''
+    return `(function(){
+if(window.__prabalaActive)return;
+window.__prabalaActive=true;
+const S=${JSON.stringify(studioOrigin+'/api/recorder/event')};
+function send(kw,p){fetch(S,{method:'POST',headers:{'Content-Type':'application/json'},mode:'cors',body:JSON.stringify({keyword:kw,params:p})}).catch(function(){});}
+function getL(el){if(!el)return'unknown';if(el.id&&!/^\\d/.test(el.id))return'#'+el.id;var t=el.getAttribute('data-testid')||el.getAttribute('data-cy');if(t)return'[data-testid="'+t+'"]';var a=el.getAttribute('aria-label');if(a)return'[aria-label="'+a+'"]';var ph=el.getAttribute('placeholder');if(ph)return'[placeholder="'+ph+'"]';var tag=el.tagName.toLowerCase();if(!['input','textarea','select'].includes(tag)){var tx=(el.innerText||el.textContent||'').trim().replace(/\\s+/g,' ').slice(0,50);if(tx)return'text='+tx;}var c=Array.from(el.classList).filter(function(x){return!/\\d{3,}/.test(x);}).slice(0,2).join('.');return tag+(c?'.'+c:'');}
+var li=null,lv='',timer=null;
+document.addEventListener('click',function(e){var el=e.target;if(['INPUT','TEXTAREA','SELECT','OPTION'].includes(el.tagName))return;send('Click',{locator:getL(el)});},true);
+document.addEventListener('input',function(e){var el=e.target;if(!['INPUT','TEXTAREA'].includes(el.tagName))return;li=el;lv=el.value;clearTimeout(timer);timer=setTimeout(function(){if(li)send('EnterText',{locator:getL(li),value:lv});},600);},true);
+document.addEventListener('change',function(e){if(e.target.tagName==='SELECT')send('SelectOption',{locator:getL(e.target),option:e.target.value});},true);
+var lu=location.href;setInterval(function(){if(location.href!==lu){lu=location.href;send('NavigateTo',{url:lu});}},500);
+var d=document.createElement('div');d.style.cssText='position:fixed;top:10px;right:10px;z-index:2147483647;background:#7c3aed;color:#fff;padding:8px 14px;border-radius:8px;font:bold 13px/1.4 sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer';d.innerHTML='\u23FA Prabala Recording<br><span style="font-weight:normal;font-size:11px">Click to stop</span>';d.onclick=function(){window.__prabalaActive=false;d.remove();};document.body.appendChild(d);
+${nav}
+send('NavigateTo',{url:location.href});
+})();`
+  }
+
   function startRecording() {
-    const ipc = api
     if (!tc) return
     setRecordedCount(0)
+    setRecorderError(null)
+    setScriptCopied(false)
     setIsRecording(true)
+
+    // Generate the client-side recording script with this page's origin embedded
+    const script = buildRecordingScript(window.location.origin, recordUrl)
+    setRecordScript(script)
 
     // Prepend Web.Launch if the test doesn't already start with one
     if (tc.steps.length === 0 || tc.steps[0].keyword !== 'Web.Launch') {
@@ -314,38 +343,24 @@ export default function TestBuilderPage() {
       updateTestCase(tc.id, { steps: [launchStep, ...tc.steps] })
     }
 
-    if (!ipc) {
-      // Browser/demo mode — simulate a few steps after a delay
-      let count = 0
-      const demoSteps: { keyword: string; params: Record<string, string> }[] = [
-        { keyword: 'NavigateTo', params: { url: recordUrl || 'https://example.com' } },
-        { keyword: 'Click', params: { locator: 'text=Get started' } },
-        { keyword: 'EnterText', params: { locator: '[placeholder="Search"]', value: '' } },
-      ]
-      const timer = setInterval(() => {
-        if (count >= demoSteps.length) { clearInterval(timer); setIsRecording(false); return }
-        ingestStep(demoSteps[count])
-        count++
-      }, 1200)
-      return
-    }
-
-    ipc.recorder.removeAllListeners()
-    ipc.recorder.onStep((step: { keyword: string; params: Record<string, string> }) => {
+    api.recorder.removeAllListeners()
+    api.recorder.onStep((step: { keyword: string; params: Record<string, string> }) => {
       ingestStep(step)
     })
-    ipc.recorder.onDone(() => {
+    api.recorder.onDone(() => {
       setIsRecording(false)
-      ipc.recorder.removeAllListeners()
+      api.recorder.removeAllListeners()
     })
-    ipc.recorder.start(recordUrl || '', projectDir ?? '')
+    api.recorder.onError((msg: string) => {
+      setRecorderError(msg)
+    })
   }
 
   function stopRecording() {
-    const ipc = api
-    ipc?.recorder.stop()
-    ipc?.recorder.removeAllListeners()
+    api.recorder.removeAllListeners()
     setIsRecording(false)
+    setRecordScript('')
+    setRecorderError(null)
 
     // Append Web.Close if the test doesn't already end with one
     const current = useAppStore.getState().activeTestCase
@@ -1064,17 +1079,42 @@ steps:
 
             {/* Recording live banner */}
             {isRecording && (
-              <div className="flex-shrink-0 flex items-center gap-3 px-6 py-2.5 bg-red-950/50 border-b border-red-700/50">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                <span className="text-xs text-red-300 font-semibold">Recording…</span>
-                <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
-                <span className="text-xs text-slate-500 ml-1 font-mono">{recordUrl || 'any URL'}</span>
-                <div className="ml-auto flex items-center gap-2">
-                  <span className="text-xs text-slate-500">Perform actions in the browser window that opened</span>
-                  <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
+              <div className="flex-shrink-0 flex flex-col gap-2 px-4 py-3 bg-red-950/50 border-b border-red-700/50">
+                {/* Status row */}
+                <div className="flex items-center gap-3">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                  <span className="text-xs text-red-300 font-semibold">Recording…</span>
+                  <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
+                  <button onClick={stopRecording} className="ml-auto flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                     <Square size={11} /> Stop
                   </button>
                 </div>
+                {/* Error message */}
+                {recorderError && (
+                  <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
+                )}
+                {/* Script instructions */}
+                {recordScript && (
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-[11px] text-slate-400">
+                      Open your app in a browser tab → press <kbd className="bg-surface-600 px-1 rounded text-slate-300">F12</kbd> → Console → paste the script below → press Enter
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <textarea
+                        readOnly
+                        value={recordScript}
+                        rows={2}
+                        className="flex-1 text-[10px] font-mono bg-surface-900 text-green-300 border border-surface-500 rounded px-2 py-1 resize-none selectable"
+                      />
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(recordScript); setScriptCopied(true); setTimeout(() => setScriptCopied(false), 2000) }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded bg-brand-700/50 hover:bg-brand-600/60 text-brand-200 text-xs border border-brand-600/40 transition-colors flex-shrink-0"
+                      >
+                        {scriptCopied ? <><Check size={11} /> Copied!</> : <><Copy size={11} /> Copy</>}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
