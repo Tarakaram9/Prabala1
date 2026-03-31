@@ -275,12 +275,12 @@ export const useAppStore = create<AppState>((set) => ({
   // Workspace — always start with no workspace so the picker is shown after login
   workspace: null,
   recentWorkspaces: (() => {
-    try { const r = localStorage.getItem('prabala_recent_ws'); return r ? JSON.parse(r) : [] } catch { return [] }
+    try { const r = localStorage.getItem('prabala_recent_ws'); const p = r ? JSON.parse(r) : []; return Array.isArray(p) ? p : [] } catch { return [] }
   })(),
   setWorkspace: (ws) => {
     localStorage.setItem('prabala_workspace', JSON.stringify(ws))
     set((s) => {
-      const recent = [ws, ...s.recentWorkspaces.filter(r => r.path !== ws.path)].slice(0, 8)
+      const recent = [ws, ...(Array.isArray(s.recentWorkspaces) ? s.recentWorkspaces : []).filter(r => r.path !== ws.path)].slice(0, 8)
       localStorage.setItem('prabala_recent_ws', JSON.stringify(recent))
       return { workspace: ws, recentWorkspaces: recent, projectDir: ws.path }
     })

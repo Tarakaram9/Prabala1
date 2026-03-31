@@ -70,7 +70,9 @@ export default function FolderBrowserModal({ title = 'Select Folder', initialPat
       api.app.getPlatform().then(platform => {
         const home = platform === 'win32'
           ? 'C:\\Users'
-          : '/Users'
+          : platform === 'darwin'
+            ? '/Users'
+            : '/'
         loadDir(home)
       }).catch(() => loadDir('/'))
     }

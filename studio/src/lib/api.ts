@@ -104,7 +104,12 @@ const api = {
       await post('/fs/write', { path: filePath, content })
     },
     async readDir(dirPath: string): Promise<{ name: string; isDir: boolean; path: string }[]> {
-      return get('/fs/dir', { path: dirPath })
+      const result = await get<unknown>('/fs/dir', { path: dirPath })
+      if (!Array.isArray(result)) {
+        const err = (result as { error?: string })?.error ?? `Cannot read directory: ${dirPath}`
+        throw new Error(err)
+      }
+      return result as { name: string; isDir: boolean; path: string }[]
     },
     async exists(filePath: string): Promise<boolean> {
       const r = await get<{ exists: boolean }>('/fs/exists', { path: filePath })
