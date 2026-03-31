@@ -464,7 +464,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         {/* Test result banner */}
         {testResult && (
-          <div className={`rounded-lg border px-4 py-3 mb-4 text-sm ${
+          <div className={`selectable rounded-lg border px-4 py-3 mb-4 text-sm ${
             testResult.ok
               ? 'bg-green-900/20 border-green-700/40 text-green-300'
               : 'bg-red-900/20 border-red-700/40 text-red-300'
@@ -473,7 +473,14 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               {testResult.ok
                 ? <Check size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
                 : <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />}
-              <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono">{testResult.message}</pre>
+              <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono flex-1">{testResult.message}</pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(testResult.message)}
+                title="Copy error message"
+                className="flex-shrink-0 opacity-50 hover:opacity-100 transition-opacity mt-0.5"
+              >
+                <Copy size={12} />
+              </button>
             </div>
           </div>
         )}
@@ -821,10 +828,13 @@ export default function AIPage() {
 
             {/* Error banner */}
             {error && (
-              <div className="flex items-start gap-2 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3">
+              <div className="selectable flex items-start gap-2 bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3">
                 <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-300">{error}</p>
-                <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-200">
+                <p className="text-sm text-red-300 flex-1">{error}</p>
+                <button onClick={() => navigator.clipboard.writeText(error)} title="Copy error" className="text-red-400 hover:text-red-200 opacity-50 hover:opacity-100 transition-opacity">
+                  <Copy size={12} />
+                </button>
+                <button onClick={() => setError(null)} className="text-red-400 hover:text-red-200">
                   <X size={13} />
                 </button>
               </div>
