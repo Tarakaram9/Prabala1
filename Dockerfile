@@ -54,6 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 \
     libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
     libxss1 libxtst6 wget xdg-utils \
+    # Virtual display so recorder can open a headful browser window
+    xvfb x11-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -76,6 +78,8 @@ COPY --from=builder /app/packages/cli/dist         ./packages/cli/dist
 COPY --from=builder /app/packages/cli/package.json ./packages/cli/package.json
 # React SPA served by studio-server
 COPY --from=builder /app/studio/dist ./studio/dist
+# Recorder/spy scripts used by the server at runtime
+COPY --from=builder /app/studio/electron ./studio/electron
 
 # Install only production deps in the runtime image
 RUN npm install --omit=dev --legacy-peer-deps
@@ -84,13 +88,17 @@ RUN npm install --omit=dev --legacy-peer-deps
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install chromium && chmod -R 755 /ms-playwright
 
+# Startup script: launch Xvfb virtual display then start server
+RUN printf '#!/bin/sh\nXvfb :99 -screen 0 1280x1024x24 -ac +extension GLX &\nsleep 1\nexec node packages/studio-server/dist/index.js\n' > /app/start.sh && chmod +x /app/start.sh
+
 # Non-root user for security
 RUN useradd -m prabala
 USER prabala
 
 ENV PORT=3000
 ENV NODE_ENV=production
+ENV DISPLAY=:99
 
 EXPOSE 3000
 
-CMD ["node", "packages/studio-server/dist/index.js"]
+CMD ["/app/start.sh"]

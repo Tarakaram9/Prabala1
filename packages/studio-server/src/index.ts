@@ -242,7 +242,12 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
     })
 
     recorderProcess.stderr?.on('data', (d: Buffer) => {
-      console.error('[Recorder stderr]', d.toString().trim())
+      const msg = d.toString().trim()
+      console.error('[Recorder stderr]', msg)
+      // Surface critical errors to the UI via WebSocket
+      if (msg.includes('Executable') || msg.includes('launch') || msg.includes('DISPLAY') || msg.includes('error')) {
+        broadcast('recorder:error', { message: msg })
+      }
     })
 
     recorderProcess.on('close', () => {
