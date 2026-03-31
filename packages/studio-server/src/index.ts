@@ -222,19 +222,9 @@ app.post('/api/recorder/event', (req: Request, res: Response) => {
   res.json({ ok: true })
 })
 
-// ── /recorder-relay ────────────────────────────────────────────────────────────
-// Serves a relay page that injects the recording script into sessionStorage,
-// then immediately navigates to the target URL. The recording script is loaded
-// on every page via a service-worker-like sessionStorage trick so it survives
-// cross-origin navigation — the user just has to allow the one-time redirect.
-app.get('/recorder-relay', (req: Request, res: Response) => {
-  const targetUrl = (req.query.url as string) || ''
-  const studioOrigin = `${req.protocol}://${req.get('host')}`
-  const eventEndpoint = `${studioOrigin}/api/recorder/event`
-
-  // The recording script that runs in the target page
-  const recordingScript = `
-(function(){
+// ── recording script helper ───────────────────────────────────────────────────
+function buildRecordingScript(eventEndpoint: string): string {
+  return `(function(){
   if(window.__prabalaActive) return;
   window.__prabalaActive = true;
   var S = ${JSON.stringify(eventEndpoint)};
@@ -280,82 +270,171 @@ app.get('/recorder-relay', (req: Request, res: Response) => {
     if (location.href !== lu) { lu = location.href; send('NavigateTo', { url: lu }); }
   }, 500);
   send('NavigateTo', { url: location.href });
-  // Floating stop badge
   var d = document.createElement('div');
   d.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#7c3aed;color:#fff;padding:8px 16px;border-radius:10px;font:bold 13px/1.6 sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.5);cursor:pointer;user-select:none';
   d.innerHTML = '&#9679; Prabala Recording<br><span style="font-weight:400;font-size:11px">Click to stop recording</span>';
   d.onclick = function(){ window.__prabalaActive = false; d.remove(); send('__stop', {}); };
   document.body.appendChild(d);
 })();`
+}
 
-  // Relay page: stores script in sessionStorage under a key, then loads a
-  // tiny loader stub that reads from sessionStorage and evals on every navigation.
-  // The loader stub is injected via a <script> on THIS page which stores itself
-  // and redirects. On the target page the user must allow the script — but since
-  // we redirect immediately the browser context carries sessionStorage.
-  //
-  // NOTE: sessionStorage is per-origin, so we cannot carry it across origins.
-  // Instead we redirect with a fragment that triggers a one-time auto-eval via
-  // a service-worker approach. Since SW requires HTTPS+same-origin, we use the
-  // simplest reliable method: open a new tab that shows a friendly instruction
-  // page, auto-copies the script, and provides a one-click "Activate" button.
+// ── /api/recorder/script ──────────────────────────────────────────────────────
+// Serves the recording script as JS — called by the bookmarklet so no
+// copy-paste is needed for cross-origin targets.
+app.get('/api/recorder/script', (req: Request, res: Response) => {
+  const studioOrigin = `${req.protocol}://${req.get('host')}`
+  const script = buildRecordingScript(`${studioOrigin}/api/recorder/event`)
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Content-Type', 'application/javascript')
+  res.send(script)
+})
+
+// ── /recorder-relay ────────────────────────────────────────────────────────────
+// Opens the target app in a new tab and tries to inject the recording script
+// automatically (works for same-origin apps). For cross-origin apps the page
+// shows a one-time bookmarklet that loads the script from /api/recorder/script.
+app.get('/recorder-relay', (req: Request, res: Response) => {
+  const targetUrl = (req.query.url as string) || ''
+  const studioOrigin = `${req.protocol}://${req.get('host')}`
+  const recordingScript = buildRecordingScript(`${studioOrigin}/api/recorder/event`)
+
+  // Bookmarklet: tiny JS URI that fetches & injects the recording script
+  const bookmarkletCode = `(function(){var s=document.createElement('script');s.src='${studioOrigin}/api/recorder/script?t='+Date.now();document.head.appendChild(s);})();`
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Prabala Recorder — Activating…</title>
+  <title>Prabala Recorder</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f15;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
-    .card{background:#14141f;border:1px solid #2a2a4a;border-radius:16px;padding:36px 40px;max-width:520px;width:100%;text-align:center}
-    .dot{width:16px;height:16px;background:#7c3aed;border-radius:50%;display:inline-block;margin-right:10px;animation:pulse 1s infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-    h2{font-size:20px;margin:12px 0 8px;color:#c084fc}
-    p{color:#94a3b8;font-size:14px;line-height:1.6;margin-bottom:20px}
-    .url{font-family:monospace;font-size:12px;color:#a78bfa;background:#1a1a2e;padding:6px 12px;border-radius:6px;word-break:break-all;margin-bottom:20px;display:block}
-    .btn{display:inline-flex;align-items:center;gap:8px;background:#7c3aed;color:#fff;border:none;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s;text-decoration:none;margin-top:4px}
+    .card{background:#14141f;border:1px solid #2a2a4a;border-radius:16px;padding:32px 36px;max-width:560px;width:100%}
+    h2{font-size:18px;margin:8px 0 4px;color:#c084fc;text-align:center}
+    .badge{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:16px;font-size:12px;color:#7c3aed;font-weight:600;letter-spacing:.05em}
+    .dot{width:10px;height:10px;background:#7c3aed;border-radius:50%;animation:pulse 1s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .url{font-family:monospace;font-size:11px;color:#a78bfa;background:#1a1a2e;padding:5px 10px;border-radius:6px;word-break:break-all;display:block;text-align:center;margin-bottom:20px}
+    .section{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:18px 20px;margin-bottom:14px}
+    .section-title{font-size:11px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+    p{color:#94a3b8;font-size:13px;line-height:1.6;margin:0}
+    .btn{display:block;width:100%;background:#7c3aed;color:#fff;border:none;padding:11px 24px;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;transition:background .15s;text-align:center;margin-top:10px}
     .btn:hover{background:#6d28d9}
-    .sub{font-size:12px;color:#475569;margin-top:16px}
-    .steps{text-align:left;margin:16px 0;background:#1a1a2e;border-radius:10px;padding:16px 20px}
-    .steps li{color:#94a3b8;font-size:13px;margin:6px 0;list-style:none;padding-left:20px;position:relative}
-    .steps li::before{content:attr(data-n);position:absolute;left:0;color:#7c3aed;font-weight:700}
-    #status{margin-top:14px;font-size:13px;color:#10b981;min-height:20px}
+    .btn:disabled{opacity:.5;cursor:default}
+    .bm-link{display:inline-flex;align-items:center;gap:6px;background:#4f46e5;color:#fff;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none;cursor:grab;border:2px dashed #818cf8;margin:8px 0}
+    .bm-link:active{cursor:grabbing}
+    .hint{font-size:11px;color:#475569;margin-top:6px}
+    #activeSection{display:none}
+    #bookmarkletSection{display:none}
+    #status{min-height:18px;font-size:12px;margin-top:10px;text-align:center;color:#94a3b8}
+    .success{color:#10b981!important}
+    .step-row{display:flex;align-items:flex-start;gap:10px;margin:6px 0}
+    .step-num{width:20px;height:20px;background:#7c3aed;border-radius:50%;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
   </style>
 </head>
 <body>
 <div class="card">
-  <span class="dot"></span><span style="font-size:13px;color:#7c3aed;font-weight:600">PRABALA STUDIO</span>
-  <h2>Ready to Record</h2>
-  <span class="url">${targetUrl || '(no URL — will record current page)'}</span>
-  <p>Click the button below to open your app and start recording automatically.</p>
-  <ol class="steps">
-    <li data-n="1">Your app opens in this tab</li>
-    <li data-n="2">A purple badge appears — you are live</li>
-    <li data-n="3">Interact normally; steps appear in Studio</li>
-    <li data-n="4">Click the badge to stop recording</li>
-  </ol>
-  <button class="btn" id="goBtn">&#9654;&nbsp; Launch &amp; Start Recording</button>
+  <div class="badge"><span class="dot"></span>PRABALA STUDIO</div>
+  <h2>Web Recorder</h2>
+  <span class="url">${targetUrl || '(no URL entered)'}</span>
+
+  <!-- Initial: open app button -->
+  <div id="openSection">
+    <div class="section">
+      <div class="section-title">Auto-launch</div>
+      <p>Opens your app in a new tab and activates recording automatically.</p>
+      <button class="btn" id="openBtn">&#9654;&ensp;Open App &amp; Start Recording</button>
+    </div>
+  </div>
+
+  <!-- Active: same-origin injection succeeded -->
+  <div id="activeSection">
+    <div class="section">
+      <div class="section-title">&#9679; Recording Active</div>
+      <div class="step-row"><span class="step-num">1</span><p>Your app is open in a new tab with a purple badge</p></div>
+      <div class="step-row"><span class="step-num">2</span><p>Interact normally — each action streams to Studio</p></div>
+      <div class="step-row"><span class="step-num">3</span><p>Click the purple badge in your app to stop recording</p></div>
+    </div>
+  </div>
+
+  <!-- Bookmarklet fallback: cross-origin -->
+  <div id="bookmarkletSection">
+    <div class="section">
+      <div class="section-title">Step 1 &mdash; One-time setup</div>
+      <p>Drag this button to your browser's bookmarks bar:</p><br>
+      <a id="bmLink" href="#" class="bm-link" title="Drag me to your bookmarks bar">&#9679;&ensp;Prabala Record</a>
+      <p class="hint">&#8593; Drag to bookmarks bar (do this once per browser)</p>
+    </div>
+    <div class="section">
+      <div class="section-title">Step 2 &mdash; Start recording</div>
+      <div class="step-row"><span class="step-num">1</span><p>Your app is already open in a new tab</p></div>
+      <div class="step-row"><span class="step-num">2</span><p>Switch to that tab and click <strong style="color:#c084fc">&#9679; Prabala Record</strong> in your bookmarks bar</p></div>
+      <div class="step-row"><span class="step-num">3</span><p>A purple badge appears — interact with your app</p></div>
+      <div class="step-row"><span class="step-num">4</span><p>Steps stream to Studio automatically</p></div>
+    </div>
+  </div>
+
   <div id="status"></div>
-  <p class="sub">Keep this tab open while recording. Closing it stops the session.</p>
 </div>
 <script>
-var SCRIPT = ${JSON.stringify(recordingScript)};
 var TARGET = ${JSON.stringify(targetUrl)};
-document.getElementById('goBtn').onclick = function() {
+var SCRIPT = ${JSON.stringify(recordingScript)};
+var BM_CODE = ${JSON.stringify(bookmarkletCode)};
+
+// Set bookmarklet href
+document.getElementById('bmLink').setAttribute('href', 'javascript:' + BM_CODE);
+
+document.getElementById('openBtn').onclick = function() {
   this.disabled = true;
-  this.textContent = 'Launching…';
-  document.getElementById('status').textContent = 'Navigating to your app…';
-  // Store script in sessionStorage so loader can pick it up
-  try { sessionStorage.setItem('__prabalaRecScript', SCRIPT); } catch(e){}
-  // Navigate to target; our loader will eval the script
-  if (TARGET) { location.href = TARGET; }
-  else { eval(SCRIPT); }
+  setStatus('Opening your app…');
+
+  if (!TARGET) {
+    // No URL: run recording on current page
+    try { eval(SCRIPT); showActive(); } catch(e) { setStatus('Error: ' + e.message); }
+    return;
+  }
+
+  var recWin = window.open(TARGET, '_blank');
+  if (!recWin) {
+    setStatus('Popup blocked — please allow popups for this site and try again.');
+    this.disabled = false;
+    return;
+  }
+
+  // Poll until the target page is loaded, then try to inject (same-origin) or
+  // show bookmarklet (cross-origin — SecurityError thrown on DOM access).
+  var attempts = 0;
+  var poller = setInterval(function() {
+    if (!recWin || recWin.closed) { clearInterval(poller); setStatus('App window was closed.'); return; }
+    if (++attempts > 40) { clearInterval(poller); showBookmarklet('App opened in new tab.'); return; }
+    try {
+      // This line throws SecurityError immediately if cross-origin
+      var href = recWin.location.href;
+      var ready = recWin.document.readyState;
+      if (href && href !== 'about:blank' && ready === 'complete') {
+        clearInterval(poller);
+        try { recWin.eval(SCRIPT); showActive(); }
+        catch(e2) { showBookmarklet('Script blocked by app CSP — use the bookmarklet instead.'); }
+      }
+    } catch(e) {
+      // SecurityError = cross-origin app
+      clearInterval(poller);
+      showBookmarklet(null);
+    }
+  }, 500);
 };
-// Listen for the target page to load and auto-inject via sessionStorage
-window.addEventListener('pageshow', function(){
-  var sc = sessionStorage.getItem('__prabalaRecScript');
-  if (sc) { sessionStorage.removeItem('__prabalaRecScript'); try { eval(sc); } catch(e){} }
-});
+
+function showActive() {
+  document.getElementById('openSection').style.display = 'none';
+  document.getElementById('activeSection').style.display = 'block';
+  setStatus('');
+}
+function showBookmarklet(msg) {
+  document.getElementById('openSection').style.display = 'none';
+  document.getElementById('bookmarkletSection').style.display = 'block';
+  if (msg) setStatus(msg);
+}
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
 </script>
 </body>
 </html>`
