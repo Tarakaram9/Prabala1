@@ -8,6 +8,7 @@
   html, body, #root {
     height: 100%;
     overflow: hidden;
+    /* Use 100% not 100vh to avoid Windows browser chrome cutting off top content */
     background-color: #0f0f15;
     color: #e2e8f0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
