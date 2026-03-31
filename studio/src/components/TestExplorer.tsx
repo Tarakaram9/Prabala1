@@ -123,6 +123,7 @@ export default function TestExplorer(props: TestExplorerProps) {
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showMoveMenu, setShowMoveMenu] = useState(false)
+  const [explorerError, setExplorerError] = useState<string | null>(null)
 
   const ctxRef = useRef<HTMLDivElement>(null)
   const renameRef = useRef<HTMLInputElement>(null)
@@ -161,6 +162,9 @@ export default function TestExplorer(props: TestExplorerProps) {
     setBusy(true)
     try {
       await ipc.fs.mkdir(newPath)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to create folder: ${e.message}`)
     } finally {
       setBusy(false)
       setCreating(null)
@@ -174,7 +178,12 @@ export default function TestExplorer(props: TestExplorerProps) {
     const rel = folderPath.replace(testsRoot + '/', '')
     if (!window.confirm(`Delete folder "${rel}" and all its test cases? This cannot be undone.`)) return
     setBusy(true)
-    try { await ipc.fs.deleteDir(folderPath) } finally {
+    try {
+      await ipc.fs.deleteDir(folderPath)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to delete folder: ${e.message}`)
+    } finally {
       setBusy(false)
       await onRescan()
     }
@@ -186,7 +195,12 @@ export default function TestExplorer(props: TestExplorerProps) {
     const newPath = `${parentPath}/${newName.trim()}`
     if (newPath === oldPath) { setRenaming(null); return }
     setBusy(true)
-    try { await ipc.fs.rename(oldPath, newPath) } finally {
+    try {
+      await ipc.fs.rename(oldPath, newPath)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to rename: ${e.message}`)
+    } finally {
       setBusy(false)
       setRenaming(null)
       await onRescan()
@@ -200,6 +214,9 @@ export default function TestExplorer(props: TestExplorerProps) {
     try {
       await ipc.fs.deleteFile(tc.filePath)
       if (props.mode === 'builder') (props as BuilderProps).onTestDeleted(tc.id)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to delete test: ${e.message}`)
     } finally {
       setBusy(false)
       await onRescan()
@@ -218,6 +235,9 @@ export default function TestExplorer(props: TestExplorerProps) {
       const updated = content.replace(/^testCase:.*$/m, `testCase: ${newName.trim()}`)
       await ipc.fs.writeFile(newPath, updated)
       if (newPath !== tc.filePath) await ipc.fs.deleteFile(tc.filePath)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to rename test: ${e.message}`)
     } finally {
       setBusy(false)
       setRenaming(null)
@@ -231,7 +251,12 @@ export default function TestExplorer(props: TestExplorerProps) {
     const newPath = `${destFolderPath}/${filename}`
     if (newPath === tc.filePath) return
     setBusy(true)
-    try { await ipc.fs.moveFile(tc.filePath, newPath) } finally {
+    try {
+      await ipc.fs.moveFile(tc.filePath, newPath)
+      setExplorerError(null)
+    } catch (e: any) {
+      setExplorerError(`Failed to move test: ${e.message}`)
+    } finally {
       setBusy(false)
       await onRescan()
     }
@@ -581,6 +606,12 @@ export default function TestExplorer(props: TestExplorerProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {toolbar}
+      {explorerError && (
+        <div className="mx-2 mt-1 px-3 py-2 bg-red-900/40 border border-red-700/50 rounded text-xs text-red-300 flex items-start gap-2">
+          <span className="flex-1">{explorerError}</span>
+          <button onClick={() => setExplorerError(null)} className="text-red-400 hover:text-red-200 flex-shrink-0">✕</button>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto py-1">
         {renderFolder(tree, 0)}
       </div>
