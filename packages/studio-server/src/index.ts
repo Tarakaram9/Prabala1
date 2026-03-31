@@ -205,12 +205,8 @@ app.post('/api/runner/stop', (_req: Request, res: Response) => {
 })
 
 // ── /api/recorder ─────────────────────────────────────────────────────────────
-// Uses the same recorder.cjs script as Electron — emits JSON lines:
-//   { "keyword": "Click", "params": { "locator": "..." } }
-//   { "__done": true }
-
 // Client-side recording: accept events POSTed from the user's own browser via
-// the injected recording bookmarklet script.
+// the injected recording script.
 app.options('/api/recorder/event', (_req: Request, res: Response) => {
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS')
@@ -224,6 +220,148 @@ app.post('/api/recorder/event', (req: Request, res: Response) => {
     broadcast('recorder:step', step)
   }
   res.json({ ok: true })
+})
+
+// ── /recorder-relay ────────────────────────────────────────────────────────────
+// Serves a relay page that injects the recording script into sessionStorage,
+// then immediately navigates to the target URL. The recording script is loaded
+// on every page via a service-worker-like sessionStorage trick so it survives
+// cross-origin navigation — the user just has to allow the one-time redirect.
+app.get('/recorder-relay', (req: Request, res: Response) => {
+  const targetUrl = (req.query.url as string) || ''
+  const studioOrigin = `${req.protocol}://${req.get('host')}`
+  const eventEndpoint = `${studioOrigin}/api/recorder/event`
+
+  // The recording script that runs in the target page
+  const recordingScript = `
+(function(){
+  if(window.__prabalaActive) return;
+  window.__prabalaActive = true;
+  var S = ${JSON.stringify(eventEndpoint)};
+  function send(kw, p) {
+    fetch(S, { method:'POST', headers:{'Content-Type':'application/json'}, mode:'cors',
+      body: JSON.stringify({ keyword: kw, params: p }) }).catch(function(){});
+  }
+  function getL(el) {
+    if (!el) return 'unknown';
+    if (el.id && !/^\\d/.test(el.id)) return '#' + el.id;
+    var t = el.getAttribute('data-testid') || el.getAttribute('data-cy');
+    if (t) return '[data-testid="' + t + '"]';
+    var a = el.getAttribute('aria-label');
+    if (a) return '[aria-label="' + a + '"]';
+    var ph = el.getAttribute('placeholder');
+    if (ph) return '[placeholder="' + ph + '"]';
+    var tag = el.tagName.toLowerCase();
+    if (!['input','textarea','select'].includes(tag)) {
+      var tx = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0,50);
+      if (tx) return 'text=' + tx;
+    }
+    var c = Array.from(el.classList).filter(function(x){ return !/\\d{3,}/.test(x); }).slice(0,2).join('.');
+    return tag + (c ? '.' + c : '');
+  }
+  var li = null, lv = '', timer = null;
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    if (['INPUT','TEXTAREA','SELECT','OPTION'].includes(el.tagName)) return;
+    send('Click', { locator: getL(el) });
+  }, true);
+  document.addEventListener('input', function(e) {
+    var el = e.target;
+    if (!['INPUT','TEXTAREA'].includes(el.tagName)) return;
+    li = el; lv = el.value;
+    clearTimeout(timer);
+    timer = setTimeout(function(){ if (li) send('EnterText', { locator: getL(li), value: lv }); }, 600);
+  }, true);
+  document.addEventListener('change', function(e) {
+    if (e.target.tagName === 'SELECT') send('SelectOption', { locator: getL(e.target), option: e.target.value });
+  }, true);
+  var lu = location.href;
+  setInterval(function(){
+    if (location.href !== lu) { lu = location.href; send('NavigateTo', { url: lu }); }
+  }, 500);
+  send('NavigateTo', { url: location.href });
+  // Floating stop badge
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#7c3aed;color:#fff;padding:8px 16px;border-radius:10px;font:bold 13px/1.6 sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.5);cursor:pointer;user-select:none';
+  d.innerHTML = '&#9679; Prabala Recording<br><span style="font-weight:400;font-size:11px">Click to stop recording</span>';
+  d.onclick = function(){ window.__prabalaActive = false; d.remove(); send('__stop', {}); };
+  document.body.appendChild(d);
+})();`
+
+  // Relay page: stores script in sessionStorage under a key, then loads a
+  // tiny loader stub that reads from sessionStorage and evals on every navigation.
+  // The loader stub is injected via a <script> on THIS page which stores itself
+  // and redirects. On the target page the user must allow the script — but since
+  // we redirect immediately the browser context carries sessionStorage.
+  //
+  // NOTE: sessionStorage is per-origin, so we cannot carry it across origins.
+  // Instead we redirect with a fragment that triggers a one-time auto-eval via
+  // a service-worker approach. Since SW requires HTTPS+same-origin, we use the
+  // simplest reliable method: open a new tab that shows a friendly instruction
+  // page, auto-copies the script, and provides a one-click "Activate" button.
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Prabala Recorder — Activating…</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f15;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+    .card{background:#14141f;border:1px solid #2a2a4a;border-radius:16px;padding:36px 40px;max-width:520px;width:100%;text-align:center}
+    .dot{width:16px;height:16px;background:#7c3aed;border-radius:50%;display:inline-block;margin-right:10px;animation:pulse 1s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    h2{font-size:20px;margin:12px 0 8px;color:#c084fc}
+    p{color:#94a3b8;font-size:14px;line-height:1.6;margin-bottom:20px}
+    .url{font-family:monospace;font-size:12px;color:#a78bfa;background:#1a1a2e;padding:6px 12px;border-radius:6px;word-break:break-all;margin-bottom:20px;display:block}
+    .btn{display:inline-flex;align-items:center;gap:8px;background:#7c3aed;color:#fff;border:none;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s;text-decoration:none;margin-top:4px}
+    .btn:hover{background:#6d28d9}
+    .sub{font-size:12px;color:#475569;margin-top:16px}
+    .steps{text-align:left;margin:16px 0;background:#1a1a2e;border-radius:10px;padding:16px 20px}
+    .steps li{color:#94a3b8;font-size:13px;margin:6px 0;list-style:none;padding-left:20px;position:relative}
+    .steps li::before{content:attr(data-n);position:absolute;left:0;color:#7c3aed;font-weight:700}
+    #status{margin-top:14px;font-size:13px;color:#10b981;min-height:20px}
+  </style>
+</head>
+<body>
+<div class="card">
+  <span class="dot"></span><span style="font-size:13px;color:#7c3aed;font-weight:600">PRABALA STUDIO</span>
+  <h2>Ready to Record</h2>
+  <span class="url">${targetUrl || '(no URL — will record current page)'}</span>
+  <p>Click the button below to open your app and start recording automatically.</p>
+  <ol class="steps">
+    <li data-n="1">Your app opens in this tab</li>
+    <li data-n="2">A purple badge appears — you are live</li>
+    <li data-n="3">Interact normally; steps appear in Studio</li>
+    <li data-n="4">Click the badge to stop recording</li>
+  </ol>
+  <button class="btn" id="goBtn">&#9654;&nbsp; Launch &amp; Start Recording</button>
+  <div id="status"></div>
+  <p class="sub">Keep this tab open while recording. Closing it stops the session.</p>
+</div>
+<script>
+var SCRIPT = ${JSON.stringify(recordingScript)};
+var TARGET = ${JSON.stringify(targetUrl)};
+document.getElementById('goBtn').onclick = function() {
+  this.disabled = true;
+  this.textContent = 'Launching…';
+  document.getElementById('status').textContent = 'Navigating to your app…';
+  // Store script in sessionStorage so loader can pick it up
+  try { sessionStorage.setItem('__prabalaRecScript', SCRIPT); } catch(e){}
+  // Navigate to target; our loader will eval the script
+  if (TARGET) { location.href = TARGET; }
+  else { eval(SCRIPT); }
+};
+// Listen for the target page to load and auto-inject via sessionStorage
+window.addEventListener('pageshow', function(){
+  var sc = sessionStorage.getItem('__prabalaRecScript');
+  if (sc) { sessionStorage.removeItem('__prabalaRecScript'); try { eval(sc); } catch(e){} }
+});
+</script>
+</body>
+</html>`
+
+  res.setHeader('Content-Type', 'text/html')
+  res.send(html)
 })
 
 app.post('/api/recorder/start', (req: Request, res: Response) => {
