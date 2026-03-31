@@ -80,8 +80,9 @@ COPY --from=builder /app/studio/dist ./studio/dist
 # Install only production deps in the runtime image
 RUN npm install --omit=dev --legacy-peer-deps
 
-# Install Playwright Chromium browser
-RUN npx playwright install chromium || true
+# Install Playwright Chromium to a shared path accessible by all users
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx playwright install chromium && chmod -R 755 /ms-playwright
 
 # Non-root user for security
 RUN useradd -m prabala
