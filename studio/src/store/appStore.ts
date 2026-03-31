@@ -416,12 +416,19 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.setItem('prabala_jira', JSON.stringify({ ...next, apiToken: '' })) // don't persist token
       return { jiraConfig: next }
     }),
-  requirements: [],
-  setRequirements: (requirements) => set({ requirements }),
+  requirements: (() => {
+    try { const s = localStorage.getItem('prabala_requirements'); const p = s ? JSON.parse(s) : []; return Array.isArray(p) ? p : [] } catch { return [] }
+  })(),
+  setRequirements: (requirements) => {
+    localStorage.setItem('prabala_requirements', JSON.stringify(requirements))
+    set({ requirements })
+  },
   upsertRequirements: (incoming) =>
     set((s) => {
       const map = new Map(s.requirements.map(r => [r.key, r]))
       incoming.forEach(r => map.set(r.key, r))
-      return { requirements: Array.from(map.values()) }
+      const next = Array.from(map.values())
+      localStorage.setItem('prabala_requirements', JSON.stringify(next))
+      return { requirements: next }
     }),
 }))
