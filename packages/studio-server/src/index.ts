@@ -18,6 +18,9 @@ const wss = new WebSocketServer({ noServer: true })
 const PORT = parseInt(process.env.PORT ?? '3000', 10)
 const STUDIO_DIST = path.resolve(__dirname, '../../../studio/dist')
 
+// Trust the first reverse proxy so req.protocol reflects https:// when running
+// behind Azure Container Apps / Nginx TLS termination.
+app.set('trust proxy', 1)
 app.use(cors())
 app.use(express.json({ limit: '50mb' }))
 app.use(express.text({ limit: '50mb' }))
@@ -325,7 +328,10 @@ function buildRecordingScript(eventEndpoint: string): string {
 // Serves the recording script as JS — called by the bookmarklet so no
 // copy-paste is needed for cross-origin targets.
 app.get('/api/recorder/script', (req: Request, res: Response) => {
-  const studioOrigin = `${req.protocol}://${req.get('host')}`
+  // Use X-Forwarded-Proto so the script gets the correct https:// origin when
+  // running behind a TLS-terminating proxy (e.g. Azure Container Apps ingress).
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+  const studioOrigin = `${proto}://${req.get('host')}`
   const script = buildRecordingScript(`${studioOrigin}/api/recorder/event`)
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Content-Type', 'application/javascript')
@@ -338,7 +344,8 @@ app.get('/api/recorder/script', (req: Request, res: Response) => {
 // shows a one-time bookmarklet that loads the script from /api/recorder/script.
 app.get('/recorder-relay', (req: Request, res: Response) => {
   const targetUrl = (req.query.url as string) || ''
-  const studioOrigin = `${req.protocol}://${req.get('host')}`
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+  const studioOrigin = `${proto}://${req.get('host')}`
   const recordingScript = buildRecordingScript(`${studioOrigin}/api/recorder/event`)
 
   // Bookmarklet: tiny JS URI that fetches & injects the recording script
