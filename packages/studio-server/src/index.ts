@@ -38,6 +38,23 @@ let runnerProcess: ChildProcess | null = null
 let recorderProcess: ChildProcess | null = null
 let spyProcess: ChildProcess | null = null
 
+const isWin = os.platform() === 'win32'
+
+/** Cross-platform graceful kill: IPC message on Windows, SIGTERM on Unix */
+function killChild(child: ChildProcess | null): void {
+  if (!child) return
+  if (isWin) {
+    // Try IPC first (for our own recorder/spy scripts that listen for messages)
+    if (child.connected) {
+      try { child.send({ type: 'stop' }) } catch { /* ignore */ }
+    }
+    // Fallback: taskkill /T for the process tree
+    try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }) } catch { /* ignore */ }
+  } else {
+    try { child.kill('SIGTERM') } catch { /* ignore */ }
+  }
+}
+
 // ── WebSocket channel registry ────────────────────────────────────────────────
 const wsClients = new Set<WebSocket>()
 
@@ -70,7 +87,21 @@ app.post('/api/fs/write', async (req: Request, res: Response) => {
   try {
     const { path: filePath, content } = req.body as { path: string; content: string }
     if (!filePath) { res.status(400).json({ error: 'path required' }); return }
-    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    // Ensure the target directory exists before writing
+    const dir = path.dirname(filePath)
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+    } catch (mkdirErr: any) {
+      // Provide a clear error when the directory can't be created (e.g. EACCES in container)
+      if (mkdirErr.code === 'EACCES' || mkdirErr.code === 'EPERM') {
+        res.status(403).json({
+          error: `Cannot write to "${filePath}". In the cloud Studio, workspaces must be under /workspaces. ` +
+                 `Please create or open a workspace folder under /workspaces and save again.`
+        })
+        return
+      }
+      throw mkdirErr
+    }
     fs.writeFileSync(filePath, content, 'utf-8')
     res.json({ ok: true })
   } catch (err: any) {
@@ -113,7 +144,17 @@ app.post('/api/fs/mkdir', (req: Request, res: Response) => {
   try {
     const { path: dirPath } = req.body as { path: string }
     if (!dirPath) { res.status(400).json({ error: 'path required' }); return }
-    fs.mkdirSync(dirPath, { recursive: true })
+    try {
+      fs.mkdirSync(dirPath, { recursive: true })
+    } catch (mkdirErr: any) {
+      if (mkdirErr.code === 'EACCES' || mkdirErr.code === 'EPERM') {
+        res.status(403).json({
+          error: `Cannot create directory "${dirPath}". In the cloud Studio, workspaces must be under /workspaces.`
+        })
+        return
+      }
+      throw mkdirErr
+    }
     res.json({ ok: true })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
@@ -216,7 +257,9 @@ app.options('/api/recorder/event', (_req: Request, res: Response) => {
 app.post('/api/recorder/event', (req: Request, res: Response) => {
   res.header('Access-Control-Allow-Origin', '*')
   const step = req.body as { keyword?: string; params?: Record<string, unknown> }
-  if (step?.keyword && step.keyword !== '__stop') {
+  if (step?.keyword === '__stop') {
+    broadcast('recorder:done', null)
+  } else if (step?.keyword) {
     broadcast('recorder:step', step)
   }
   res.json({ ok: true })
@@ -446,7 +489,7 @@ function setStatus(msg) { document.getElementById('status').textContent = msg; }
 app.post('/api/recorder/start', (req: Request, res: Response) => {
   try {
     const { startUrl, projectDir } = req.body as { startUrl: string; projectDir: string }
-    if (recorderProcess) { recorderProcess.kill('SIGTERM'); recorderProcess = null }
+    if (recorderProcess) { killChild(recorderProcess); recorderProcess = null }
 
     // Resolve recorder.cjs relative to this file:
     // dist/index.js → ../../../studio/electron/recorder.cjs
@@ -455,6 +498,7 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
 
     recorderProcess = spawn('node', [recorderScript, startUrl || ''], {
       cwd: projectDir || process.cwd(),
+      stdio: isWin ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         NODE_PATH: monoRepoNodeModules,
@@ -496,7 +540,7 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
 })
 
 app.post('/api/recorder/stop', (_req: Request, res: Response) => {
-  if (recorderProcess) { recorderProcess.kill('SIGTERM'); recorderProcess = null }
+  if (recorderProcess) { killChild(recorderProcess); recorderProcess = null }
   broadcast('recorder:done', null)
   res.json({ ok: true })
 })
@@ -508,7 +552,7 @@ app.post('/api/recorder/stop', (_req: Request, res: Response) => {
 app.post('/api/spy/start', (req: Request, res: Response) => {
   try {
     const { url, mode = 'web' } = req.body as { url: string; mode?: 'web' | 'sap' | 'desktop' | 'mobile' }
-    if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+    if (spyProcess) { killChild(spyProcess); spyProcess = null }
 
     const electronDir = path.resolve(__dirname, '../../../studio/electron')
     const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
@@ -545,7 +589,7 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
             console.log('[Spy] broadcasting locator to', wsClients.size, 'clients:', JSON.stringify(obj))
             broadcast('spy:locator', obj)  // { locator, tag, text }
             setTimeout(() => {
-              if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+              if (spyProcess) { killChild(spyProcess); spyProcess = null }
             }, 300)
           }
         } catch { /* ignore malformed */ }
@@ -568,7 +612,7 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
 })
 
 app.post('/api/spy/stop', (_req: Request, res: Response) => {
-  if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null }
+  if (spyProcess) { killChild(spyProcess); spyProcess = null }
   broadcast('spy:done', null)
   res.json({ ok: true })
 })

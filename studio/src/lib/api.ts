@@ -170,44 +170,71 @@ const api = {
 
   recorder: {
     async start(startUrl: string, projectDir: string): Promise<void> {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc) return ipc.start(startUrl, projectDir)
+      // Web/container mode: open the relay page in the user's own browser tab.
+      // The injected bookmarklet script POSTs steps to /api/recorder/event which
+      // broadcasts them via WebSocket — no server-side Playwright needed.
       getWs()
-      await post('/recorder/start', { startUrl, projectDir })
+      window.open(`/recorder-relay?url=${encodeURIComponent(startUrl)}`, '_blank')
     },
     async stop(): Promise<void> {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc) { await ipc.stop(); return }
       await post('/recorder/stop', {})
     },
     onStep(cb: (step: { keyword: string; params: Record<string, string> }) => void): void {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc) { ipc.onStep(cb); return }
       wsOn('recorder:step', (p) => cb(p as { keyword: string; params: Record<string, string> }))
     },
     onDone(cb: () => void): void {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc) { ipc.onDone(cb); return }
       wsOn('recorder:done', () => cb())
     },
     onError(cb: (msg: string) => void): void {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc?.onError) { ipc.onError(cb); return }
       wsOn('recorder:error', (p) => cb((p as { message: string }).message ?? String(p)))
     },
     removeAllListeners(): void {
+      const ipc = (window as any).prabala?.recorder
+      if (ipc) { ipc.removeAllListeners(); return }
       wsOffAll(['recorder:step', 'recorder:done', 'recorder:error'])
     },
   },
 
   spy: {
     async start(url: string, mode: SpyMode = 'web'): Promise<void> {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) return ipc.start(url, mode)
       getWs()
       await post('/spy/start', { url, mode })
     },
     async stop(): Promise<void> {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { await ipc.stop(); return }
       await post('/spy/stop', {})
     },
     onLocator(cb: (result: { locator: string; tag: string; text: string }) => void): void {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { ipc.onLocator(cb); return }
       wsOn('spy:locator', (p) => cb(p as { locator: string; tag: string; text: string }))
     },
     onDone(cb: () => void): void {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { ipc.onDone(cb); return }
       wsOn('spy:done', () => cb())
     },
     onError(cb: (message: string) => void): void {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { ipc.onError(cb); return }
       wsOn('spy:error', (p) => cb(String(p)))
     },
     removeAllListeners(): void {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { ipc.removeAllListeners(); return }
       wsOffAll(['spy:locator', 'spy:done', 'spy:error'])
     },
   },
