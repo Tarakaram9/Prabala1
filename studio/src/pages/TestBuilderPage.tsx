@@ -259,9 +259,13 @@ export default function TestBuilderPage() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [objectPicker])
 
-  // Clean up spy on unmount
+  // Clean up recorder and spy on unmount
   useEffect(() => {
-    return () => { api.spy.removeAllListeners() }
+    return () => {
+      api.recorder.stop().catch(() => {})
+      api.recorder.removeAllListeners()
+      api.spy.removeAllListeners()
+    }
   }, [])
 
   const tc = activeTestCase
@@ -270,9 +274,16 @@ export default function TestBuilderPage() {
   const [isRecording, setIsRecording] = useState(false)
   const [recorderBarOpen, setRecorderBarOpen] = useState(false)
   const [recordUrl, setRecordUrl] = useState('')
+  // In web/container mode (no Electron IPC), expose a bookmarklet link so the
+  // user can activate recording in the newly-opened tab.
+  const isElectron = typeof window !== 'undefined' && !!(window as any).prabala
+  const bookmarkletUrl = !isElectron
+    ? `javascript:(function(){var s=document.createElement('script');s.src='${location.origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s);})();`
+    : null
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // ─ Spy state ────────────────────────────────────────────────────────────
   const [spyTarget, setSpyTarget] = useState<{ stepId: string; key: string } | null>(null)
@@ -303,17 +314,11 @@ export default function TestBuilderPage() {
   }
 
   // ─ Recording ──────────────────────────────────────────────────────────────
-  function startRecording() {
+  async function startRecording() {
     if (!tc) return
     setRecordedCount(0)
     setRecorderError(null)
     setIsRecording(true)
-
-    // Open the relay page in a new tab — it shows a "Launch & Start Recording"
-    // button that navigates to the target app and injects the recording script
-    // automatically. Steps are POSTed back to /api/recorder/event → WebSocket.
-    const relayUrl = `${window.location.origin}/recorder-relay?url=${encodeURIComponent(recordUrl)}`
-    window.open(relayUrl, '_blank', 'noopener')
 
     // Prepend Web.Launch if the test doesn't already start with one
     if (tc.steps.length === 0 || tc.steps[0].keyword !== 'Web.Launch') {
@@ -332,9 +337,18 @@ export default function TestBuilderPage() {
     api.recorder.onError((msg: string) => {
       setRecorderError(msg)
     })
+
+    // Launch Playwright browser via the recorder backend
+    try {
+      await api.recorder.start(recordUrl, projectDir ?? '')
+    } catch (err: any) {
+      setRecorderError(err?.message || 'Failed to start recorder')
+      setIsRecording(false)
+    }
   }
 
   function stopRecording() {
+    api.recorder.stop().catch(() => {})
     api.recorder.removeAllListeners()
     setIsRecording(false)
     setRecorderError(null)
@@ -457,7 +471,13 @@ export default function TestBuilderPage() {
   }
 
   async function saveTestCase() {
-    if (!tc || !projectDir) return
+    if (!tc) return
+    if (!projectDir) {
+      setSaveError('No workspace selected. Open a workspace folder first.')
+      setSaveStatus('error')
+      setTimeout(() => setSaveStatus('idle'), 4000)
+      return
+    }
 
     // Strip params where every value is empty — prevents runner failures
     // from unset locators while still writing params that have real values
@@ -485,17 +505,8 @@ export default function TestBuilderPage() {
       })),
     }, { lineWidth: 120, noRefs: true })
 
-    const ipc = api
-
-    if (!ipc) {
-      // Demo / browser mode — no write but simulate success
-      setSaveStatus('ok')
-      markSaved(tc.id)
-      setTimeout(() => setSaveStatus('idle'), 2000)
-      return
-    }
-
     setSaveStatus('saving')
+    setSaveError(null)
     try {
       // Tests created from BDD/Gherkin or other sources may have no filePath yet —
       // auto-assign one under projectDir/tests/ before writing
@@ -505,14 +516,17 @@ export default function TestBuilderPage() {
         savePath = `${projectDir}/tests/${slug}-${Date.now()}.yaml`
         updateTestCase(tc.id, { filePath: savePath })
       }
-      await ipc.fs.writeFile(savePath, yamlContent)
+      await api.fs.writeFile(savePath, yamlContent)
       markSaved(tc.id)
       setSaveStatus('ok')
+      setSaveError(null)
     } catch (err: any) {
       console.error('[Save] failed:', err)
+      const msg = err?.message ?? String(err)
+      setSaveError(msg)
       setSaveStatus('error')
     } finally {
-      setTimeout(() => setSaveStatus('idle'), 2500)
+      setTimeout(() => setSaveStatus('idle'), 4000)
     }
   }
 
@@ -1054,6 +1068,17 @@ steps:
               </div>
             )}
 
+            {/* Save error banner */}
+            {saveStatus === 'error' && saveError && (
+              <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 bg-red-950/50 border-b border-red-700/50">
+                <AlertCircle size={13} className="text-red-400 flex-shrink-0" />
+                <span className="text-xs text-red-300 flex-1 min-w-0">
+                  <span className="font-semibold">Save failed: </span>{saveError}
+                </span>
+                <button onClick={() => setSaveError(null)} className="text-red-700 hover:text-red-400 flex-shrink-0 text-xs">×</button>
+              </div>
+            )}
+
             {/* Recording live banner */}
             {isRecording && (
               <div className="flex-shrink-0 flex flex-col gap-2 px-4 py-3 bg-red-950/50 border-b border-red-700/50">
@@ -1063,12 +1088,40 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-slate-500">Switch to the recording tab and interact</span>
+                    {isElectron ? (
+                      <span className="text-xs text-slate-500">Interact in the recording window</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">
+                        Switch to the app tab, then{' '}
+                        <a
+                          href={bookmarkletUrl!}
+                          className="text-violet-400 hover:text-violet-300 underline cursor-pointer"
+                          title="Drag to bookmarks bar, then click in your app tab to start recording"
+                        >
+                          click &#9679;&thinsp;Prabala Record
+                        </a>
+                        {' '}in your bookmarks bar
+                      </span>
+                    )}
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                       <Square size={11} /> Stop
                     </button>
                   </div>
                 </div>
+                {!isElectron && bookmarkletUrl && recordedCount === 0 && (
+                  <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900/50 rounded px-3 py-2 border border-slate-700/40">
+                    <span className="text-slate-500">One-time setup:</span>
+                    <span>Drag</span>
+                    <a
+                      href={bookmarkletUrl}
+                      className="inline-flex items-center gap-1 bg-violet-700 hover:bg-violet-600 text-white px-2 py-0.5 rounded text-xs font-semibold cursor-grab border-2 border-dashed border-violet-400"
+                      title="Drag this to your bookmarks bar"
+                    >
+                      &#9679;&thinsp;Prabala Record
+                    </a>
+                    <span>to your bookmarks bar, then click it in your app tab to start recording</span>
+                  </div>
+                )}
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
                 )}

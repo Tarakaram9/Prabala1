@@ -169,14 +169,14 @@ const api = {
   },
 
   recorder: {
-    async start(startUrl: string, projectDir: string): Promise<void> {
+    async start(startUrl: string, _projectDir: string): Promise<void> {
       const ipc = (window as any).prabala?.recorder
-      if (ipc) return ipc.start(startUrl, projectDir)
-      // Web/container mode: open the relay page in the user's own browser tab.
-      // The injected bookmarklet script POSTs steps to /api/recorder/event which
-      // broadcasts them via WebSocket — no server-side Playwright needed.
+      if (ipc) return ipc.start(startUrl, _projectDir)
+      // Web/container mode: open the target URL directly in a new tab.
+      // The user activates recording by clicking the bookmarklet shown
+      // in the Test Builder recording banner.
       getWs()
-      window.open(`/recorder-relay?url=${encodeURIComponent(startUrl)}`, '_blank')
+      if (startUrl) window.open(startUrl, '_blank')
     },
     async stop(): Promise<void> {
       const ipc = (window as any).prabala?.recorder
