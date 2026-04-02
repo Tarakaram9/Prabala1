@@ -277,6 +277,8 @@ export default function TestBuilderPage() {
   const isElectron = typeof window !== 'undefined' && !!(window as any).prabala
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
+  const [scriptCopied, setScriptCopied] = useState(false)
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -357,6 +359,25 @@ export default function TestBuilderPage() {
     // Immediately trigger AI analysis when recording is done (no debounce)
     scheduleAutoAnalysis('Recording completed', 500)
   }
+
+  // Copy the tiny loader snippet to clipboard so user can paste in browser console
+  function copyRecordingScript() {
+    const origin = window.location.origin
+    const snippet = `(function(){var s=document.createElement('script');s.src='${origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s)})();`
+    navigator.clipboard.writeText(snippet).then(() => {
+      setScriptCopied(true)
+      setTimeout(() => setScriptCopied(false), 3000)
+    })
+  }
+
+  // Set bookmarklet href directly — React strips javascript: URIs as a security measure
+  useEffect(() => {
+    if (bookmarkletRef.current) {
+      const origin = window.location.origin
+      const code = `(function(){var s=document.createElement('script');s.src='${origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s)})();`
+      bookmarkletRef.current.setAttribute('href', 'javascript:' + code)
+    }
+  }, [])
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
   function startSpy(stepId: string, key: string) {
@@ -1083,12 +1104,47 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
+                    {isElectron && (
+                      <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
+                    )}
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                       <Square size={11} /> Stop
                     </button>
                   </div>
                 </div>
+                {/* Web mode: show script injection instructions */}
+                {!isElectron && (
+                  <div className="flex flex-col gap-2 bg-slate-900/60 rounded-lg px-3 py-2.5 border border-slate-700/40">
+                    <p className="text-xs text-slate-300 font-semibold">Activate recording in the target tab:</p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-xs text-slate-400">1. In the new tab, open DevTools → Console (F12)</span>
+                      <button
+                        onClick={copyRecordingScript}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-800/60 hover:bg-purple-700/60 text-purple-200 text-xs font-semibold transition-colors border border-purple-600/30"
+                      >
+                        {scriptCopied
+                          ? <><CheckCircle2 size={11} className="text-green-400" /> Copied!</>
+                          : <><Copy size={11} /> 2. Copy Script</>}
+                      </button>
+                      <span className="text-xs text-slate-400">3. Paste &amp; press Enter → interact with your app</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">One-time bookmarklet (drag to bookmarks bar):</span>
+                      {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
+                      <a
+                        ref={bookmarkletRef}
+                        draggable
+                        onClick={e => e.preventDefault()}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-orange-900/50 border border-orange-600/40 text-orange-300 text-xs cursor-grab select-none hover:bg-orange-800/50"
+                        title="Drag this to your bookmarks bar, then click it on any page to start recording"
+                      >
+                        🔴 PrabalaRec
+                      </a>
+                      <span className="text-xs text-slate-600">— click it on any page to start recording instantly</span>
+                    </div>
+                    <p className="text-xs text-slate-600">Steps appear here as you interact. Click Stop (above) or the purple badge in the tab when done.</p>
+                  </div>
+                )}
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
                 )}
