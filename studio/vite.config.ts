@@ -23,6 +23,14 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      '/recorder-proxy': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/recorder-relay': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
       '/prabala-ws': {
         target: 'ws://localhost:3000',
         ws: true,
