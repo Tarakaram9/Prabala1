@@ -197,10 +197,19 @@ const api = {
       if (ipc?.onError) { ipc.onError(cb); return }
       wsOn('recorder:error', (p) => cb((p as { message: string }).message ?? String(p)))
     },
+    onScreenshot(cb: (frame: { data: string; width: number; height: number }) => void): void {
+      wsOn('recorder:screenshot', (p) => cb(p as { data: string; width: number; height: number }))
+    },
+    interact(cmd: Record<string, unknown>): void {
+      const ws = getWs()
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'recorder:interact', payload: cmd }))
+      }
+    },
     removeAllListeners(): void {
       const ipc = (window as any).prabala?.recorder
       if (ipc) { ipc.removeAllListeners(); return }
-      wsOffAll(['recorder:step', 'recorder:done', 'recorder:error'])
+      wsOffAll(['recorder:step', 'recorder:done', 'recorder:error', 'recorder:screenshot'])
     },
   },
 

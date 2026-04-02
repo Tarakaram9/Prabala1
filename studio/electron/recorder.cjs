@@ -12,8 +12,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const playwright = require('playwright');
+const os = require('os');
 
 const startUrl = process.argv[2] || '';
+const isWin = os.platform() === 'win32';
+
+// Detect headless container: explicit env, or Linux without a DISPLAY
+const forceHeadless = process.env.PRABALA_HEADLESS === '1' ||
+  (os.platform() === 'linux' && !process.env.DISPLAY);
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -107,13 +113,20 @@ const INTERCEPT_SCRIPT = /* js */ `
 `;
 
 async function run() {
+  const launchArgs = [
+    '--window-size=1280,820',
+    '--window-position=80,80',
+    '--disable-infobars',
+  ];
+  // Containers / CI: add --no-sandbox on Linux (required when running in Docker,
+  // even as a non-root user, because user namespaces are typically disabled)
+  if (os.platform() === 'linux') {
+    launchArgs.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
+  }
+
   const browser = await playwright.chromium.launch({
-    headless: false,
-    args: [
-      '--window-size=1280,820',
-      '--window-position=80,80',
-      '--disable-infobars',
-    ],
+    headless: forceHeadless,
+    args: launchArgs,
   });
 
   const context = await browser.newContext({ viewport: null });
@@ -161,26 +174,67 @@ async function run() {
     }
   }
 
+  // ── Docker / headless mode: stream screenshots + accept pointer/keyboard commands ──────
+  // When running in a container the user can't see the browser window directly.
+  // We stream JPEG snapshots via stdout so the Studio UI can show a live preview,
+  // and we accept JSON commands on stdin so the user can interact with the page.
+  if (forceHeadless) {
+    // Screenshot stream
+    const screenshotInterval = setInterval(async () => {
+      try {
+        if (page.isClosed()) return;
+        const buf = await page.screenshot({ fullPage: false, type: 'jpeg', quality: 55, timeout: 3000 });
+        emit({ __screenshot: buf.toString('base64'), width: 1280, height: 820 });
+      } catch { /* page may be navigating */ }
+    }, 300);
+
+    // Stop the interval when the browser closes
+    browser.on('disconnected', () => clearInterval(screenshotInterval));
+
+    // Stdin interaction commands
+    let stdinBuf = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      stdinBuf += chunk;
+      const lines = stdinBuf.split('\n');
+      stdinBuf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const cmd = JSON.parse(line);
+          if (cmd.cmd === 'click')  page.mouse.click(cmd.x, cmd.y).catch(() => {});
+          if (cmd.cmd === 'dblclick') page.mouse.dblclick(cmd.x, cmd.y).catch(() => {});
+          if (cmd.cmd === 'type')   page.keyboard.type(cmd.text, { delay: 30 }).catch(() => {});
+          if (cmd.cmd === 'key')    page.keyboard.press(cmd.key).catch(() => {});
+          if (cmd.cmd === 'scroll') page.mouse.wheel(cmd.dx ?? 0, cmd.dy ?? 0).catch(() => {});
+        } catch { /* malformed command */ }
+      }
+    });
+  }
+
   // Signal done when browser is closed by user
   browser.on('disconnected', () => {
     emit({ __done: true });
     process.exit(0);
   });
 
-  // Allow parent to send SIGTERM to stop recording
-  process.on('SIGTERM', () => {
+  function gracefulShutdown() {
     browser.close().catch(() => {}).finally(() => {
       emit({ __done: true });
       process.exit(0);
     });
-  });
+  }
 
-  process.on('SIGINT', () => {
-    browser.close().catch(() => {}).finally(() => {
-      emit({ __done: true });
-      process.exit(0);
+  // Unix: SIGTERM / SIGINT
+  process.on('SIGTERM', gracefulShutdown);
+  process.on('SIGINT', gracefulShutdown);
+
+  // Windows: parent sends { type: 'stop' } via IPC because SIGTERM is unreliable
+  if (isWin) {
+    process.on('message', (msg) => {
+      if (msg && msg.type === 'stop') gracefulShutdown();
     });
-  });
+  }
 }
 
 run().catch((err) => {

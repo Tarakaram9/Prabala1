@@ -277,6 +277,8 @@ export default function TestBuilderPage() {
   const isElectron = typeof window !== 'undefined' && !!(window as any).prabala
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
+  const [recorderScreenshot, setRecorderScreenshot] = useState<string | null>(null)
+  const recorderImgRef = useRef<HTMLImageElement>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -313,6 +315,7 @@ export default function TestBuilderPage() {
     if (!tc) return
     setRecordedCount(0)
     setRecorderError(null)
+    setRecorderScreenshot(null)
     setIsRecording(true)
 
     // Prepend Web.Launch if the test doesn't already start with one
@@ -327,10 +330,14 @@ export default function TestBuilderPage() {
     })
     api.recorder.onDone(() => {
       setIsRecording(false)
+      setRecorderScreenshot(null)
       api.recorder.removeAllListeners()
     })
     api.recorder.onError((msg: string) => {
       setRecorderError(msg)
+    })
+    api.recorder.onScreenshot((frame) => {
+      setRecorderScreenshot(`data:image/jpeg;base64,${frame.data}`)
     })
 
     // Launch Playwright browser via the recorder backend
@@ -347,6 +354,7 @@ export default function TestBuilderPage() {
     api.recorder.removeAllListeners()
     setIsRecording(false)
     setRecorderError(null)
+    setRecorderScreenshot(null)
 
     // Append Web.Close if the test doesn't already end with one
     const current = useAppStore.getState().activeTestCase
@@ -1085,12 +1093,53 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
+                    {!recorderScreenshot && (
+                      <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
+                    )}
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                       <Square size={11} /> Stop
                     </button>
                   </div>
                 </div>
+
+                {/* Live browser preview — shown in Docker/web mode when screenshots stream in */}
+                {recorderScreenshot && (
+                  <div className="relative rounded overflow-hidden border border-red-700/40 bg-black cursor-crosshair select-none"
+                    style={{ aspectRatio: '1280/820', maxHeight: '420px' }}
+                    onKeyDown={(e) => {
+                      e.preventDefault()
+                      // Printable characters go as type commands; special keys go as key presses
+                      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+                        api.recorder.interact({ cmd: 'type', text: e.key })
+                      } else {
+                        api.recorder.interact({ cmd: 'key', key: e.key })
+                      }
+                    }}
+                    tabIndex={0}
+                    onClick={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      const scaleX = 1280 / rect.width
+                      const scaleY = 820 / rect.height
+                      api.recorder.interact({ cmd: 'click', x: Math.round((e.clientX - rect.left) * scaleX), y: Math.round((e.clientY - rect.top) * scaleY) })
+                    }}
+                    onDoubleClick={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      const scaleX = 1280 / rect.width
+                      const scaleY = 820 / rect.height
+                      api.recorder.interact({ cmd: 'dblclick', x: Math.round((e.clientX - rect.left) * scaleX), y: Math.round((e.clientY - rect.top) * scaleY) })
+                    }}
+                    onWheel={(e) => {
+                      api.recorder.interact({ cmd: 'scroll', dx: 0, dy: e.deltaY })
+                    }}
+                  >
+                    <img ref={recorderImgRef} src={recorderScreenshot} alt="Live browser preview"
+                      className="w-full h-full object-contain pointer-events-none" draggable={false} />
+                    <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] text-slate-400">
+                      Click &amp; type to interact · scroll to scroll
+                    </div>
+                  </div>
+                )}
+
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
                 )}

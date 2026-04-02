@@ -80,6 +80,11 @@ wss.on('connection', (ws) => {
       if (msg.type === 'extension:hello') {
         // Browser extension connected — tag this socket
         extensionClients.add(ws)
+      } else if (msg.type === 'recorder:interact') {
+        // Forward pointer/keyboard command to the recorder process stdin
+        if (recorderProcess?.stdin) {
+          recorderProcess.stdin.write(JSON.stringify(msg.payload) + '\n')
+        }
       }
     } catch { /* ignore */ }
   })
@@ -798,7 +803,10 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
       for (const line of lines) {
         try {
           const obj = JSON.parse(line)
-          if (obj.__done) {
+          if (obj.__screenshot) {
+            // Live browser preview frame — broadcast separately (not a test step)
+            broadcast('recorder:screenshot', { data: obj.__screenshot, width: obj.width, height: obj.height })
+          } else if (obj.__done) {
             broadcast('recorder:done', null)
           } else {
             broadcast('recorder:step', obj)
