@@ -277,16 +277,8 @@ export default function TestBuilderPage() {
   const isElectron = typeof window !== 'undefined' && !!(window as any).prabala
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
-  const [scriptCopied, setScriptCopied] = useState(false)
-  const [extensionConnected, setExtensionConnected] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
-
-  // Check extension status on mount and whenever recorder bar opens
-  useEffect(() => {
-    if (isElectron) return
-    api.extension.isConnected().then(setExtensionConnected)
-  }, [isElectron, recorderBarOpen, isRecording])
 
   // ─ Spy state ────────────────────────────────────────────────────────────
   const [spyTarget, setSpyTarget] = useState<{ stepId: string; key: string } | null>(null)
@@ -364,16 +356,6 @@ export default function TestBuilderPage() {
 
     // Immediately trigger AI analysis when recording is done (no debounce)
     scheduleAutoAnalysis('Recording completed', 500)
-  }
-
-  // Copy the tiny loader snippet — fallback if extension is not installed
-  function copyRecordingScript() {
-    const origin = window.location.origin
-    const snippet = `(function(){var s=document.createElement('script');s.src='${origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s)})();`
-    navigator.clipboard.writeText(snippet).then(() => {
-      setScriptCopied(true)
-      setTimeout(() => setScriptCopied(false), 3000)
-    })
   }
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
@@ -1080,23 +1062,6 @@ steps:
                   </button>
                   <button onClick={() => setRecorderBarOpen(false)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
                 </div>
-                {!isElectron && (
-                  <div className="flex items-center gap-2">
-                    {extensionConnected
-                      ? <span className="flex items-center gap-1.5 text-xs text-green-400"><CheckCircle2 size={11} /> Prabala Recorder extension connected — recording will start automatically</span>
-                      : <span className="text-xs text-amber-400">
-                          ⚠ Extension not installed.{' '}
-                          <a
-                            href={`${window.location.origin}/extension`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline text-purple-400 hover:text-purple-300"
-                          >How to install</a>
-                          {' '}· or paste a script in the console after clicking Start.
-                        </span>
-                    }
-                  </div>
-                )}
               </div>
             )}
 
@@ -1120,35 +1085,12 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    {(isElectron || extensionConnected) && (
-                      <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
-                    )}
+                    <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                       <Square size={11} /> Stop
                     </button>
                   </div>
                 </div>
-                {/* Web mode without extension: show manual console fallback */}
-                {!isElectron && !extensionConnected && (
-                  <div className="flex flex-col gap-2 bg-slate-900/60 rounded-lg px-3 py-2.5 border border-slate-700/40">
-                    <p className="text-xs text-amber-300 font-semibold">⚡ Extension not detected — activate recording manually:</p>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-xs text-slate-400">1. Open the new tab (F12 → Console)</span>
-                      <button
-                        onClick={copyRecordingScript}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-800/60 hover:bg-purple-700/60 text-purple-200 text-xs font-semibold transition-colors border border-purple-600/30"
-                      >
-                        {scriptCopied
-                          ? <><CheckCircle2 size={11} className="text-green-400" /> Copied!</>
-                          : <><Copy size={11} /> 2. Copy Script</>}
-                      </button>
-                      <span className="text-xs text-slate-400">3. Paste &amp; Enter → interact with your app</span>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      Install the <span className="text-purple-400 font-semibold">Prabala Recorder extension</span> to skip this step — recording will work exactly like Electron.
-                    </p>
-                  </div>
-                )}
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
                 )}

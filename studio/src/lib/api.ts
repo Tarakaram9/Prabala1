@@ -172,11 +172,10 @@ const api = {
     async start(startUrl: string, projectDir: string): Promise<void> {
       const ipc = (window as any).prabala?.recorder
       if (ipc) return ipc.start(startUrl, projectDir)
-      // Web/browser mode: register pending recording on server (mode:'web' tells
-      // server NOT to spawn Playwright — extension injects into the tab we open).
+      // Web mode: tell the server to spawn Playwright and open the browser —
+      // identical to the Electron path, no extension or window.open needed.
       getWs()
-      await post('/recorder/start', { startUrl, projectDir, mode: 'web' })
-      window.open(startUrl || 'about:blank', '_blank')
+      await post('/recorder/start', { startUrl, projectDir })
     },
     async stop(): Promise<void> {
       const ipc = (window as any).prabala?.recorder
