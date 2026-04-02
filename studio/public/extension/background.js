@@ -1,5 +1,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Prabala Recorder — Chrome/Edge Extension Background Service Worker
+// Prabala Recorder — Background Service Worker (minimal)
+//
+// The heavy lifting is now done by content.js via HTTP polling.
+// This background script is kept only to seed the default studio origin on
+// first install, so content.js has a starting point.
+// ─────────────────────────────────────────────────────────────────────────────
+
+chrome.runtime.onInstalled.addListener(() => {
+  // Seed with localhost:3000 (dev default). The content.js on the Studio page
+  // will overwrite this with the actual origin once the user opens Studio.
+  chrome.storage.local.get('studioOrigin', (result) => {
+    if (!result.studioOrigin) {
+      chrome.storage.local.set({ studioOrigin: 'http://localhost:3000' });
+    }
+  });
+});
+
 //
 // Connects to the Prabala Studio WebSocket server.
 // When the Studio sends a "recorder:inject" message, this worker injects the

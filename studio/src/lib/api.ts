@@ -172,12 +172,11 @@ const api = {
     async start(startUrl: string, projectDir: string): Promise<void> {
       const ipc = (window as any).prabala?.recorder
       if (ipc) return ipc.start(startUrl, projectDir)
-      // Web mode: open the target URL in a new tab, then tell the server to
-      // inject the recording script (via browser extension if connected, or
-      // Playwright as fallback).
+      // Web mode: register the pending recording on the server FIRST (so the
+      // extension content script finds it when the new tab loads), THEN open tab.
       getWs()
-      window.open(startUrl || 'about:blank', '_blank')
       await post('/recorder/start', { startUrl, projectDir })
+      window.open(startUrl || 'about:blank', '_blank')
     },
     async stop(): Promise<void> {
       const ipc = (window as any).prabala?.recorder

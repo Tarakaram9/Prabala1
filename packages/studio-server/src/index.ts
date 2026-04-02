@@ -43,6 +43,13 @@ let runnerProcess: ChildProcess | null = null
 let recorderProcess: ChildProcess | null = null
 let spyProcess: ChildProcess | null = null
 
+// ── Pending recording (consumed by the browser extension content script) ──────
+// When /api/recorder/start is called, we register the target URL here.
+// The extension's content.js polls /api/recorder/pending on every page load
+// and injects the recording script if there's a match.
+interface PendingRecording { url: string; scriptSrc: string; expiresAt: number }
+let pendingRecording: PendingRecording | null = null
+
 const isWin = os.platform() === 'win32'
 
 /** Cross-platform graceful kill: IPC message on Windows, SIGTERM on Unix */
@@ -94,6 +101,31 @@ function broadcast(type: string, payload: unknown) {
 app.get('/api/extension/status', (_req: Request, res: Response) => {
   const connected = [...extensionClients].some(ws => ws.readyState === WebSocket.OPEN)
   res.json({ connected })
+})
+
+// ── /api/recorder/pending ─────────────────────────────────────────────────────
+// Polled by the browser extension content script on every page load.
+// Returns { inject: true, scriptSrc } if the current URL matches a pending
+// recording session, then clears the pending record so it only fires once.
+// CORS headers are set explicitly so cross-origin content scripts can reach it.
+app.get('/api/recorder/pending', (req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  const url = (req.query.url as string) || ''
+  if (!pendingRecording || Date.now() > pendingRecording.expiresAt) {
+    pendingRecording = null
+    res.json({ inject: false })
+    return
+  }
+  // Match on path prefix so redirects & query strings don't break matching
+  const pendingBase = pendingRecording.url.split('?')[0].split('#')[0]
+  const currentBase = url.split('?')[0].split('#')[0]
+  if (currentBase.startsWith(pendingBase) || pendingBase.startsWith(currentBase)) {
+    const { scriptSrc } = pendingRecording
+    pendingRecording = null   // consume — inject only once
+    res.json({ inject: true, scriptSrc })
+  } else {
+    res.json({ inject: false })
+  }
 })
 
 // ── /api/fs ───────────────────────────────────────────────────────────────────
@@ -727,18 +759,27 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
   try {
     const { startUrl, projectDir, mode } = req.body as { startUrl: string; projectDir: string; mode?: string }
 
-    // ── Extension mode (web) ───────────────────────────────────────────────
-    // If a browser extension is connected *or* the caller explicitly requests
-    // extension mode, broadcast "recorder:inject" so the extension injects the
-    // recording script into the target tab directly — no Playwright needed.
+    const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+    const studioOrigin = `${proto}://${req.get('host')}`
+
+    // ── Always register a pending recording so the content script can pick it up
+    // This works regardless of whether the extension is connected via WS.
+    // The content script polls /api/recorder/pending on every new page load.
+    pendingRecording = {
+      url: startUrl || '',
+      scriptSrc: `${studioOrigin}/api/recorder/script`,
+      expiresAt: Date.now() + 60000,   // 60 s window for the tab to load
+    }
+
+    // ── Also broadcast via WS for the (legacy) extension WS path ─────────
+    broadcast('recorder:inject', {
+      url: startUrl || '',
+      scriptSrc: `${studioOrigin}/api/recorder/script`,
+    })
+
+    // ── If extension connected via WS, skip Playwright entirely ───────────
     const extensionConnected = [...extensionClients].some(ws => ws.readyState === WebSocket.OPEN)
     if (extensionConnected || mode === 'extension') {
-      const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
-      const studioOrigin = `${proto}://${req.get('host')}`
-      broadcast('recorder:inject', {
-        url: startUrl || '',
-        scriptSrc: `${studioOrigin}/api/recorder/script`,
-      })
       res.json({ ok: true, mode: 'extension' })
       return
     }

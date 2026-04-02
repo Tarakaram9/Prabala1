@@ -1,20 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Prabala Recorder",
-  "version": "1.0.0",
-  "description": "Automatically injects the Prabala recording script into any browser tab when recording is started in Prabala Studio.",
-  "permissions": ["scripting", "tabs", "storage"],
+  "version": "1.1.0",
+  "description": "Automatically injects the Prabala recording script into browser tabs when recording is started in Prabala Studio.",
+  "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Prabala Recorder — connected to Studio"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [],
-      "matches": ["<all_urls>"]
-    }
-  ]
+    "default_title": "Prabala Recorder"
+  }
 }
