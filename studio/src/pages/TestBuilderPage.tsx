@@ -1099,8 +1099,6 @@ steps:
                 )}
               </div>
             )}
-              </div>
-            )}
 
             {/* Save error banner */}
             {saveStatus === 'error' && saveError && (
