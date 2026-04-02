@@ -205,8 +205,8 @@ export class TestEngine {
 
     try {
       const webSession = context.driverInstances['web'] as any;
-      if (webSession?.page) {
-        const buf: Buffer = await webSession.page.screenshot({ fullPage: false }) as Buffer;
+      if (webSession?.page && !webSession.page.isClosed()) {
+        const buf: Buffer = await webSession.page.screenshot({ fullPage: false, timeout: 10000 }) as Buffer;
         fs.writeFileSync(absPath, buf);
         context.artifacts.screenshots.push(absPath);
         return relPath;
