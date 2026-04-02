@@ -4,6 +4,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import express, { Request, Response } from 'express'
 import { createServer } from 'http'
+import * as https from 'https'
+import * as http from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import cors from 'cors'
 import path from 'path'
@@ -323,6 +325,157 @@ function buildRecordingScript(eventEndpoint: string): string {
   document.body.appendChild(d);
 })();`
 }
+
+// ── /recorder-proxy ────────────────────────────────────────────────────────────
+// Transparent HTTP proxy that fetches the target URL server-side, injects the
+// recording script, and returns the patched HTML to the user's browser.
+// This gives the same seamless recording experience as Electron — no bookmarklet.
+
+/** Fetch a URL server-side, following redirects, returning body + metadata. */
+function proxyFetch(
+  targetUrl: string,
+  reqHeaders: Record<string, string> = {},
+  redirects = 0
+): Promise<{ status: number; headers: Record<string, string | string[]>; body: Buffer; finalUrl: string }> {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) { reject(new Error('Too many redirects')); return }
+    let parsed: URL
+    try { parsed = new URL(targetUrl) } catch (e) { reject(e); return }
+
+    const lib: typeof https | typeof http = parsed.protocol === 'https:' ? https : http
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; PrabalaRecorder/1.0)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        ...reqHeaders,
+      },
+    }
+
+    const req = (lib as typeof https).request(options, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const redirectUrl = new URL(res.headers.location as string, targetUrl).href
+        res.resume()
+        proxyFetch(redirectUrl, reqHeaders, redirects + 1).then(resolve).catch(reject)
+        return
+      }
+      const chunks: Buffer[] = []
+      res.on('data', (chunk: Buffer) => chunks.push(chunk))
+      res.on('end', () => resolve({
+        status: res.statusCode ?? 200,
+        headers: res.headers as Record<string, string | string[]>,
+        body: Buffer.concat(chunks),
+        finalUrl: targetUrl,
+      }))
+      res.on('error', reject)
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+/** Script injected BEFORE app code: routes fetch()/XHR relative calls through our proxy. */
+function buildProxyPatch(targetOrigin: string, proxyBase: string): string {
+  return `(function(){
+  var TO=${JSON.stringify(targetOrigin)},PB=${JSON.stringify(proxyBase)};
+  function px(u){
+    if(!u||typeof u!=='string') return u;
+    if(/^(data:|blob:|javascript:|mailto:|tel:)/.test(u)) return u;
+    try {
+      var a=new URL(u, location.href);
+      if(a.origin===TO) return PB+encodeURIComponent(a.href);
+    } catch(e){}
+    return u;
+  }
+  var oF=window.fetch.bind(window);
+  window.fetch=function(u,o){return oF(typeof u==='string'?px(u):u,o);};
+  var oO=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,u){return oO.call(this,m,px(String(u)));};
+})();`
+}
+
+app.get('/recorder-proxy', async (req: Request, res: Response) => {
+  const targetUrl = req.query.url as string
+  if (!targetUrl) { res.status(400).send('<p>url query param required</p>'); return }
+
+  try {
+    // Forward cookies from user's browser to the target for authenticated sessions
+    const fwdHeaders: Record<string, string> = {}
+    if (req.headers['cookie']) fwdHeaders['cookie'] = req.headers['cookie'] as string
+
+    const { status, headers, body, finalUrl } = await proxyFetch(targetUrl, fwdHeaders)
+    const contentType = (headers['content-type'] as string) || ''
+
+    // Strip headers that would block script injection or cause security issues
+    const skipHeaders = new Set([
+      'content-security-policy', 'x-frame-options', 'content-length',
+      'transfer-encoding', 'connection', 'strict-transport-security',
+      'x-content-type-options',
+    ])
+    Object.entries(headers).forEach(([k, v]) => {
+      if (!skipHeaders.has(k.toLowerCase()) && v) {
+        try { res.setHeader(k, v as string) } catch { /* ignore invalid header values */ }
+      }
+    })
+
+    // Pass-through non-HTML (CSS, JS, images, JSON, etc.)
+    if (!contentType.includes('text/html')) {
+      res.status(status).send(body)
+      return
+    }
+
+    const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+    const studioOrigin = `${proto}://${req.get('host')}`
+    const proxyBase = `${studioOrigin}/recorder-proxy?url=`
+    const targetOrigin = (() => { try { return new URL(finalUrl).origin } catch { return '' } })()
+
+    const recordingScript = buildRecordingScript(`${studioOrigin}/api/recorder/event`)
+    const proxyPatch = buildProxyPatch(targetOrigin, proxyBase)
+
+    let html = body.toString('utf-8')
+
+    // Inject <base> (relative asset URLs resolve to target) + proxy patch before any app JS
+    const headInject = `<base href="${targetOrigin}/"><script>${proxyPatch}</script>`
+    if (/<head[^>]*>/i.test(html)) {
+      html = html.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${headInject}`)
+    } else {
+      html = headInject + html
+    }
+
+    // Rewrite anchor hrefs so navigation stays within the proxy chain
+    html = html.replace(/\bhref="([^"#][^"]*)"/gi, (_m, href) => {
+      if (/^(javascript:|data:|mailto:|tel:|#)/.test(href)) return _m
+      try {
+        const abs = new URL(href, finalUrl).href
+        if (targetOrigin && abs.startsWith(targetOrigin)) {
+          return `href="${proxyBase}${encodeURIComponent(abs)}"`
+        }
+      } catch { /* keep original */ }
+      return _m
+    })
+
+    // Inject recording script just before </body>
+    const scriptTag = `<script>${recordingScript}</script>`
+    if (html.includes('</body>')) {
+      html = html.replace('</body>', `${scriptTag}</body>`)
+    } else {
+      html += scriptTag
+    }
+
+    res.status(status).setHeader('Content-Type', 'text/html; charset=utf-8').send(html)
+  } catch (err: any) {
+    res.status(502).send(`<!DOCTYPE html><html><body style="font:14px sans-serif;padding:2rem;background:#0f0f15;color:#e2e8f0">
+      <h3 style="color:#f87171">&#9888; Could not load page</h3>
+      <p>URL: <code style="color:#a78bfa">${targetUrl}</code></p>
+      <pre style="color:#94a3b8;white-space:pre-wrap">${err.message}</pre>
+      <p style="color:#64748b;font-size:12px">Make sure the URL is accessible from the server and is not blocked by a firewall.</p>
+    </body></html>`)
+  }
+})
 
 // ── /api/recorder/script ──────────────────────────────────────────────────────
 // Serves the recording script as JS — called by the bookmarklet so no

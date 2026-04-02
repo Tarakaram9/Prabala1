@@ -274,12 +274,7 @@ export default function TestBuilderPage() {
   const [isRecording, setIsRecording] = useState(false)
   const [recorderBarOpen, setRecorderBarOpen] = useState(false)
   const [recordUrl, setRecordUrl] = useState('')
-  // In web/container mode (no Electron IPC), expose a bookmarklet link so the
-  // user can activate recording in the newly-opened tab.
   const isElectron = typeof window !== 'undefined' && !!(window as any).prabala
-  const bookmarkletUrl = !isElectron
-    ? `javascript:(function(){var s=document.createElement('script');s.src='${location.origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s);})();`
-    : null
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
@@ -1088,40 +1083,12 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    {isElectron ? (
-                      <span className="text-xs text-slate-500">Interact in the recording window</span>
-                    ) : (
-                      <span className="text-xs text-slate-400">
-                        Switch to the app tab, then{' '}
-                        <a
-                          href={bookmarkletUrl!}
-                          className="text-violet-400 hover:text-violet-300 underline cursor-pointer"
-                          title="Drag to bookmarks bar, then click in your app tab to start recording"
-                        >
-                          click &#9679;&thinsp;Prabala Record
-                        </a>
-                        {' '}in your bookmarks bar
-                      </span>
-                    )}
+                    <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
                       <Square size={11} /> Stop
                     </button>
                   </div>
                 </div>
-                {!isElectron && bookmarkletUrl && recordedCount === 0 && (
-                  <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900/50 rounded px-3 py-2 border border-slate-700/40">
-                    <span className="text-slate-500">One-time setup:</span>
-                    <span>Drag</span>
-                    <a
-                      href={bookmarkletUrl}
-                      className="inline-flex items-center gap-1 bg-violet-700 hover:bg-violet-600 text-white px-2 py-0.5 rounded text-xs font-semibold cursor-grab border-2 border-dashed border-violet-400"
-                      title="Drag this to your bookmarks bar"
-                    >
-                      &#9679;&thinsp;Prabala Record
-                    </a>
-                    <span>to your bookmarks bar, then click it in your app tab to start recording</span>
-                  </div>
-                )}
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
                 )}

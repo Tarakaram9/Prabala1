@@ -172,11 +172,12 @@ const api = {
     async start(startUrl: string, _projectDir: string): Promise<void> {
       const ipc = (window as any).prabala?.recorder
       if (ipc) return ipc.start(startUrl, _projectDir)
-      // Web/container mode: open the target URL directly in a new tab.
-      // The user activates recording by clicking the bookmarklet shown
-      // in the Test Builder recording banner.
+      // Web/container mode: open the target URL through the studio transparent proxy.
+      // The server fetches the page, injects the recording script, and returns it —
+      // recording starts immediately with no bookmarklet needed.
       getWs()
-      if (startUrl) window.open(startUrl, '_blank')
+      const proxyUrl = `/recorder-proxy?url=${encodeURIComponent(startUrl || 'about:blank')}`
+      window.open(proxyUrl, '_blank')
     },
     async stop(): Promise<void> {
       const ipc = (window as any).prabala?.recorder
