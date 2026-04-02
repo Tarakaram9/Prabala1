@@ -9,8 +9,35 @@ import * as os from 'os';
 import { execFile, spawn } from 'child_process';
 import { AzureOpenAI } from 'openai';
 
+// Auto-updater — only active in packaged builds
+let autoUpdater: any = null;
+if (app.isPackaged) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    autoUpdater = require('electron-updater').autoUpdater;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+  } catch {
+    // electron-updater not installed — skip silently (dev builds)
+  }
+}
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const RENDERER_URL = 'http://localhost:5173';
+const isWin = os.platform() === 'win32';
+
+/** Cross-platform graceful kill: IPC message on Windows, SIGTERM on Unix */
+function killChild(child: ReturnType<typeof spawn> | null): void {
+  if (!child) return;
+  if (isWin) {
+    if (child.connected) {
+      try { child.send({ type: 'stop' }); } catch { /* ignore */ }
+    }
+    try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ignore */ }
+  } else {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -62,6 +89,11 @@ app.whenReady().then(() => {
 
   createWindow();
   registerIpcHandlers();
+
+  // Check for updates silently after startup (packaged builds only)
+  if (autoUpdater) {
+    setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 5000);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -173,7 +205,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('runner:stop', () => {
-    runningProcess?.kill();
+    killChild(runningProcess);
     runningProcess = null;
     return true;
   });
@@ -183,7 +215,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('recorder:start', (_e, startUrl: string, projectDir: string) => {
     if (recorderProcess) {
-      recorderProcess.kill('SIGTERM');
+      killChild(recorderProcess);
       recorderProcess = null;
     }
 
@@ -197,6 +229,7 @@ function registerIpcHandlers(): void {
     // NODE_PATH ensures playwright resolves from the monorepo node_modules
     recorderProcess = spawn('node', [recorderScript, startUrl || ''], {
       cwd: projectDir,
+      stdio: isWin ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         NODE_PATH: path.join(projectDir, 'node_modules'),
@@ -218,7 +251,9 @@ function registerIpcHandlers(): void {
     });
 
     recorderProcess.stderr?.on('data', (data: Buffer) => {
-      console.error('[Recorder stderr]', data.toString().trim());
+      const msg = data.toString().trim();
+      console.error('[Recorder stderr]', msg);
+      if (msg) mainWindow?.webContents.send('recorder:error', msg);
     });
 
     recorderProcess.on('close', () => {
@@ -230,7 +265,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('recorder:stop', () => {
-    recorderProcess?.kill('SIGTERM');
+    killChild(recorderProcess);
     recorderProcess = null;
     return true;
   });
@@ -239,7 +274,7 @@ function registerIpcHandlers(): void {
   let spyProcess: ReturnType<typeof spawn> | null = null;
 
   ipcMain.handle('spy:start', (_e, url: string, mode: 'web' | 'sap' | 'desktop' | 'mobile' = 'web') => {
-    if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
+    if (spyProcess) { killChild(spyProcess); spyProcess = null; }
 
     const electronDir = isDev
       ? path.join(__dirname, '..', 'electron')
@@ -280,7 +315,7 @@ function registerIpcHandlers(): void {
           } else {
             mainWindow?.webContents.send('spy:locator', obj); // { locator, tag, text }
             setTimeout(() => {
-              if (spyProcess) { spyProcess.kill('SIGTERM'); spyProcess = null; }
+              if (spyProcess) { killChild(spyProcess); spyProcess = null; }
             }, 300);
           }
         } catch { /* ignore malformed */ }
@@ -288,7 +323,9 @@ function registerIpcHandlers(): void {
     });
 
     spyProcess.stderr?.on('data', (data: Buffer) => {
-      console.error('[Spy stderr]', data.toString().trim());
+      const msg = data.toString().trim();
+      console.error('[Spy stderr]', msg);
+      if (msg) mainWindow?.webContents.send('spy:error', msg);
     });
 
     spyProcess.on('close', () => {
@@ -300,7 +337,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('spy:stop', () => {
-    spyProcess?.kill('SIGTERM');
+    killChild(spyProcess);
     spyProcess = null;
     return true;
   });

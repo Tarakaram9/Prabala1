@@ -1299,6 +1299,58 @@ app.post('/api/ai/impact', (req: Request, res: Response) => {
   }
 })
 
+// ── /download — Desktop installer download page ───────────────────────────────
+const BLOB_BASE = 'https://stiototportaldev.blob.core.windows.net/releases'
+app.get('/download', async (_req: Request, res: Response) => {
+  // List blobs in the releases container to find the latest installers
+  let winUrl = `${BLOB_BASE}/Prabala-Studio-Setup.exe`
+  let macUrl = `${BLOB_BASE}/Prabala-Studio.dmg`
+  let linuxUrl = `${BLOB_BASE}/Prabala-Studio.AppImage`
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Download Prabala Studio</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0f0f15;color:#e2e8f0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;gap:2rem}
+    h1{font-size:2rem;font-weight:700;color:#a78bfa;margin:0}
+    p{color:#94a3b8;margin:0;text-align:center}
+    .cards{display:flex;gap:1.5rem;flex-wrap:wrap;justify-content:center}
+    .card{background:#1e1b2e;border:1px solid #312d4b;border-radius:1rem;padding:2rem 2.5rem;display:flex;flex-direction:column;align-items:center;gap:1rem;min-width:200px}
+    .card h2{margin:0;font-size:1.1rem;color:#c4b5fd}
+    a.btn{background:#7c3aed;color:#fff;padding:.75rem 1.75rem;border-radius:.5rem;text-decoration:none;font-weight:600;font-size:.95rem;transition:background .2s}
+    a.btn:hover{background:#6d28d9}
+    .sub{font-size:.8rem;color:#64748b}
+  </style>
+</head>
+<body>
+  <h1>Prabala Studio</h1>
+  <p>Download the desktop app for your platform</p>
+  <div class="cards">
+    <div class="card">
+      <h2>🪟 Windows</h2>
+      <a class="btn" href="${winUrl}">Download .exe</a>
+      <span class="sub">Windows 10 / 11 (x64)</span>
+    </div>
+    <div class="card">
+      <h2>🍎 macOS</h2>
+      <a class="btn" href="${macUrl}">Download .dmg</a>
+      <span class="sub">macOS 12+ (Intel &amp; Apple Silicon)</span>
+    </div>
+    <div class="card">
+      <h2>🐧 Linux</h2>
+      <a class="btn" href="${linuxUrl}">Download .AppImage</a>
+      <span class="sub">Ubuntu 20.04+ / any distro</span>
+    </div>
+  </div>
+  <p class="sub">Already installed? The app will auto-update when a new version is available.</p>
+</body>
+</html>`
+  res.setHeader('Content-Type', 'text/html')
+  res.send(html)
+})
+
 // ── Static React build ────────────────────────────────────────────────────────
 if (fs.existsSync(STUDIO_DIST)) {
   app.use(express.static(STUDIO_DIST))

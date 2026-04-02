@@ -9,7 +9,8 @@
     "build": "vite build && tsc -p tsconfig.electron.json",
     "build:web": "VITE_TARGET=web vite build",
     "preview": "electron .",
-    "pack": "npm run build && electron-builder"
+    "pack": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish=always"
   },
   "dependencies": {
     "@prabala/core": "*",
@@ -49,13 +50,18 @@
       "output": "release"
     },
     "mac": {
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
     },
     "win": {
       "target": "nsis"
     },
     "linux": {
       "target": "AppImage"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://stiototportaldev.blob.core.windows.net/releases/"
     }
   },
   "license": "Apache-2.0"

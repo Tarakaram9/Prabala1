@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prabala Studio — Build & Publish Electron Desktop App
+#
+# Triggered manually (workflow_dispatch) or on a version tag (v*).
+# Builds Windows (.exe), macOS (.dmg), and Linux (.AppImage) installers,
+# then uploads them to Azure Blob Storage (public `releases` container).
+#
+# Required GitHub Secrets (same storage account as the Container App):
+#   AZURE_STORAGE_CONNECTION_STRING  — Connection string for stiototportaldev
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release Electron App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 1.0.0)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # ── Build on each OS ────────────────────────────────────────────────────────
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install monorepo dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install electron-updater
+        run: npm install --save electron-updater --legacy-peer-deps
+        working-directory: studio
+
+      - name: Build core packages
+        run: |
+          npm run build -w packages/core
+          npm run build -w packages/reporting
+          npm run build -w packages/driver-api
+          npm run build -w packages/object-repository
+
+      - name: Bump version (if provided)
+        if: ${{ github.event.inputs.version != '' }}
+        run: |
+          cd studio
+          npm version ${{ github.event.inputs.version }} --no-git-tag-version
+
+      - name: Build & package Electron app
+        run: npm run dist -w studio
+        env:
+          # electron-builder generic publisher reads these but we handle upload ourselves
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            studio/release/*.exe
+            studio/release/*.dmg
+            studio/release/*.AppImage
+            studio/release/*.yml
+            studio/release/*.yaml
+          if-no-files-found: warn
+
+  # ── Upload all artifacts to Azure Blob Storage ─────────────────────────────
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to Azure Blob Storage
+        run: |
+          az storage blob upload-batch \
+            --destination releases \
+            --source artifacts \
+            --pattern "**/*" \
+            --overwrite true \
+            --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}"
+
+      - name: Print download URLs
+        run: |
+          BASE="https://stiototportaldev.blob.core.windows.net/releases"
+          echo ""
+          echo "✅ Prabala Studio installers published:"
+          echo "   Windows : $BASE/release-windows-latest/Prabala Studio Setup*.exe"
+          echo "   macOS   : $BASE/release-macos-latest/Prabala Studio*.dmg"
+          echo "   Linux   : $BASE/release-ubuntu-latest/Prabala Studio*.AppImage"
+          echo ""
+          echo "📋 Copy the direct links from:"
+          echo "   https://portal.azure.com → stiototportaldev → Containers → releases"
