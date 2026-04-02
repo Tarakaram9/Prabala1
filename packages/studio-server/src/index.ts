@@ -335,7 +335,9 @@ function buildRecordingScript(eventEndpoint: string): string {
 function proxyFetch(
   targetUrl: string,
   reqHeaders: Record<string, string> = {},
-  redirects = 0
+  redirects = 0,
+  method = 'GET',
+  body?: Buffer
 ): Promise<{ status: number; headers: Record<string, string | string[]>; body: Buffer; finalUrl: string }> {
   return new Promise((resolve, reject) => {
     if (redirects > 5) { reject(new Error('Too many redirects')); return }
@@ -347,11 +349,12 @@ function proxyFetch(
       hostname: parsed.hostname,
       port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
       path: parsed.pathname + parsed.search,
-      method: 'GET',
+      method,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; PrabalaRecorder/1.0)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        ...(body ? { 'Content-Length': String(body.length) } : {}),
         ...reqHeaders,
       },
     }
@@ -360,7 +363,8 @@ function proxyFetch(
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         const redirectUrl = new URL(res.headers.location as string, targetUrl).href
         res.resume()
-        proxyFetch(redirectUrl, reqHeaders, redirects + 1).then(resolve).catch(reject)
+        // Follow redirects as GET (standard browser behaviour after POST)
+        proxyFetch(redirectUrl, reqHeaders, redirects + 1, 'GET').then(resolve).catch(reject)
         return
       }
       const chunks: Buffer[] = []
@@ -374,6 +378,7 @@ function proxyFetch(
       res.on('error', reject)
     })
     req.on('error', reject)
+    if (body) req.write(body)
     req.end()
   })
 }
@@ -398,16 +403,27 @@ function buildProxyPatch(targetOrigin: string, proxyBase: string): string {
 })();`
 }
 
-app.get('/recorder-proxy', async (req: Request, res: Response) => {
+app.all('/recorder-proxy', async (req: Request, res: Response) => {
   const targetUrl = req.query.url as string
   if (!targetUrl) { res.status(400).send('<p>url query param required</p>'); return }
 
   try {
-    // Forward cookies from user's browser to the target for authenticated sessions
+    // Forward cookies + content-type from user's browser to the target
     const fwdHeaders: Record<string, string> = {}
     if (req.headers['cookie']) fwdHeaders['cookie'] = req.headers['cookie'] as string
+    if (req.headers['content-type']) fwdHeaders['content-type'] = req.headers['content-type'] as string
+    if (req.headers['authorization']) fwdHeaders['authorization'] = req.headers['authorization'] as string
 
-    const { status, headers, body, finalUrl } = await proxyFetch(targetUrl, fwdHeaders)
+    // Collect request body for non-GET methods
+    const reqBody: Buffer | undefined = (req.method !== 'GET' && req.method !== 'HEAD')
+      ? await new Promise<Buffer>((resolve) => {
+          const chunks: Buffer[] = []
+          req.on('data', (c: Buffer) => chunks.push(c))
+          req.on('end', () => resolve(Buffer.concat(chunks)))
+        })
+      : undefined
+
+    const { status, headers, body, finalUrl } = await proxyFetch(targetUrl, fwdHeaders, 0, req.method, reqBody)
     const contentType = (headers['content-type'] as string) || ''
 
     // Strip headers that would block script injection or cause security issues
