@@ -320,5 +320,8 @@ const api = {
 
 const electronBridge = typeof window !== 'undefined' ? (window as Window & { prabala?: PrabalaApi }).prabala : undefined
 
-export default (electronBridge ?? api)
+// In Electron, window.prabala provides IPC-backed methods but is missing REST-only
+// sections (results, schedules, aiImpact, _wsOff). Merge so IPC wins where it
+// exists and the REST fallback fills in any gaps.
+export default electronBridge ? { ...api, ...electronBridge } : api
 export type PrabalaApi = typeof api
