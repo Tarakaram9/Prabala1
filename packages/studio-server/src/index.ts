@@ -777,10 +777,12 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
       scriptSrc: `${studioOrigin}/api/recorder/script`,
     })
 
-    // ── If extension connected via WS, skip Playwright entirely ───────────
+    // ── Web/browser mode: extension handles injection — skip Playwright ───
+    // mode:'web' means the client is a browser (not Electron), so the
+    // Prabala Recorder extension will inject into the tab the client opened.
     const extensionConnected = [...extensionClients].some(ws => ws.readyState === WebSocket.OPEN)
-    if (extensionConnected || mode === 'extension') {
-      res.json({ ok: true, mode: 'extension' })
+    if (mode === 'web' || extensionConnected || mode === 'extension') {
+      res.json({ ok: true, mode: mode ?? 'web' })
       return
     }
 
