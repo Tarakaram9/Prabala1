@@ -231,11 +231,34 @@ export const webKeywords: KeywordDefinition[] = [
   // ── Waits ───────────────────────────────────────────────────────────────────
   {
     name: 'WaitForVisible',
-    description: 'Wait until an element is visible',
-    params: ['locator'],
+    description: 'Wait until an element is visible. timeout=0 means no limit (default).',
+    params: ['locator', 'timeout'],
     execute: async (params, context) => {
       const page = getPage(context);
-      await (await resolveLocator(page, params.locator, context)).waitFor({ state: 'visible' });
+      const timeoutMs = params.timeout !== undefined && params.timeout !== ''
+        ? Number(params.timeout)
+        : 0  // 0 = no timeout in Playwright waitFor
+      await (await resolveLocator(page, params.locator, context)).waitFor({ state: 'visible', timeout: timeoutMs });
+    },
+  },
+  {
+    name: 'WaitForEnabled',
+    description: 'Wait until an element is visible AND enabled (e.g. button no longer disabled). timeout=0 means no limit (default).',
+    params: ['locator', 'timeout'],
+    execute: async (params, context) => {
+      const page = getPage(context);
+      const timeoutMs = params.timeout !== undefined && params.timeout !== ''
+        ? Number(params.timeout)
+        : 0
+      const loc = await resolveLocator(page, params.locator, context);
+      await loc.waitFor({ state: 'visible', timeout: timeoutMs });
+      // Poll isEnabled() since waitFor() only checks visibility, not enabled state
+      const deadline = timeoutMs === 0 ? Infinity : Date.now() + timeoutMs;
+      while (true) {
+        if (await loc.isEnabled()) break;
+        if (Date.now() > deadline) throw new Error(`Element still disabled after ${timeoutMs}ms`);
+        await page.waitForTimeout(200);
+      }
     },
   },
   {
