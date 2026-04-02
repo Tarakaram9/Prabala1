@@ -169,13 +169,15 @@ const api = {
   },
 
   recorder: {
-    async start(startUrl: string, _projectDir: string): Promise<void> {
+    async start(startUrl: string, projectDir: string): Promise<void> {
       const ipc = (window as any).prabala?.recorder
-      if (ipc) return ipc.start(startUrl, _projectDir)
-      // Web mode: open the target URL directly. The recording script is injected
-      // by the user via copy-paste (console) or bookmarklet — see recording banner.
+      if (ipc) return ipc.start(startUrl, projectDir)
+      // Web mode: open the target URL in a new tab, then tell the server to
+      // inject the recording script (via browser extension if connected, or
+      // Playwright as fallback).
       getWs()
       window.open(startUrl || 'about:blank', '_blank')
+      await post('/recorder/start', { startUrl, projectDir })
     },
     async stop(): Promise<void> {
       const ipc = (window as any).prabala?.recorder
@@ -201,6 +203,18 @@ const api = {
       const ipc = (window as any).prabala?.recorder
       if (ipc) { ipc.removeAllListeners(); return }
       wsOffAll(['recorder:step', 'recorder:done', 'recorder:error'])
+    },
+  },
+
+  extension: {
+    async isConnected(): Promise<boolean> {
+      try {
+        const r = await fetch('/api/extension/status')
+        const d = await r.json() as { connected: boolean }
+        return d.connected ?? false
+      } catch {
+        return false
+      }
     },
   },
 

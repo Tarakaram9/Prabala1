@@ -62,10 +62,24 @@ function killChild(child: ChildProcess | null): void {
 
 // ── WebSocket channel registry ────────────────────────────────────────────────
 const wsClients = new Set<WebSocket>()
+// Track which WS connections are from the browser extension
+const extensionClients = new Set<WebSocket>()
 
 wss.on('connection', (ws) => {
   wsClients.add(ws)
-  ws.on('close', () => wsClients.delete(ws))
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString()) as { type: string; payload?: unknown }
+      if (msg.type === 'extension:hello') {
+        // Browser extension connected — tag this socket
+        extensionClients.add(ws)
+      }
+    } catch { /* ignore */ }
+  })
+  ws.on('close', () => {
+    wsClients.delete(ws)
+    extensionClients.delete(ws)
+  })
 })
 
 function broadcast(type: string, payload: unknown) {
@@ -74,6 +88,13 @@ function broadcast(type: string, payload: unknown) {
     if (ws.readyState === WebSocket.OPEN) ws.send(msg)
   })
 }
+
+// ── /api/extension/status ─────────────────────────────────────────────────────
+// The Studio React app polls this to show "Extension connected" badge.
+app.get('/api/extension/status', (_req: Request, res: Response) => {
+  const connected = [...extensionClients].some(ws => ws.readyState === WebSocket.OPEN)
+  res.json({ connected })
+})
 
 // ── /api/fs ───────────────────────────────────────────────────────────────────
 
@@ -507,6 +528,46 @@ app.get('/api/recorder/script', (req: Request, res: Response) => {
   res.send(script)
 })
 
+// ── /extension ────────────────────────────────────────────────────────────────
+// Simple HTML page explaining how to install the browser extension.
+app.get('/extension', (req: Request, res: Response) => {
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+  const studioOrigin = `${proto}://${req.get('host')}`
+  res.setHeader('Content-Type', 'text/html; charset=utf-8').send(`<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Install Prabala Recorder Extension</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f15;color:#e2e8f0;padding:40px 24px;max-width:640px;margin:auto}
+  h1{font-size:22px;color:#c084fc;margin-bottom:6px}
+  p{color:#94a3b8;font-size:14px;line-height:1.7;margin:10px 0}
+  ol{padding-left:22px;color:#94a3b8;font-size:14px;line-height:2}
+  li{margin:4px 0}
+  code{background:#1e1e2e;color:#a78bfa;padding:2px 7px;border-radius:5px;font-size:13px}
+  .note{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:12px;padding:16px 20px;margin:20px 0}
+  a{color:#7c3aed}
+</style>
+</head>
+<body>
+<h1>🔌 Prabala Recorder Extension</h1>
+<p>Install this extension once and recording will work automatically — exactly like the Electron app. No copy-paste needed.</p>
+<div class="note">
+  <p><strong style="color:#e2e8f0">Chrome / Edge (Chromium)</strong></p>
+  <ol>
+    <li>Open <code>chrome://extensions</code> (or <code>edge://extensions</code>)</li>
+    <li>Enable <strong>Developer mode</strong> (toggle in top-right)</li>
+    <li>Click <strong>Load unpacked</strong></li>
+    <li>Select the <code>extension</code> folder at this URL:<br>
+      <code>${studioOrigin}/extension-download</code> — or find it in your Prabala Studio installation at <code>studio/public/extension/</code></li>
+    <li>The extension icon appears in the toolbar — it auto-connects to Prabala Studio</li>
+  </ol>
+</div>
+<p>After installation, come back to the Test Builder and open the Record bar — you'll see <strong style="color:#4ade80">Extension connected ✓</strong>.</p>
+<p style="margin-top:24px"><a href="javascript:window.close()">← Back to Studio</a></p>
+</body>
+</html>`)
+})
+
 // ── /recorder-relay ────────────────────────────────────────────────────────────
 // Opens the target app in a new tab and tries to inject the recording script
 // automatically (works for same-origin apps). For cross-origin apps the page
@@ -664,7 +725,24 @@ function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
 app.post('/api/recorder/start', (req: Request, res: Response) => {
   try {
-    const { startUrl, projectDir } = req.body as { startUrl: string; projectDir: string }
+    const { startUrl, projectDir, mode } = req.body as { startUrl: string; projectDir: string; mode?: string }
+
+    // ── Extension mode (web) ───────────────────────────────────────────────
+    // If a browser extension is connected *or* the caller explicitly requests
+    // extension mode, broadcast "recorder:inject" so the extension injects the
+    // recording script into the target tab directly — no Playwright needed.
+    const extensionConnected = [...extensionClients].some(ws => ws.readyState === WebSocket.OPEN)
+    if (extensionConnected || mode === 'extension') {
+      const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim()
+      const studioOrigin = `${proto}://${req.get('host')}`
+      broadcast('recorder:inject', {
+        url: startUrl || '',
+        scriptSrc: `${studioOrigin}/api/recorder/script`,
+      })
+      res.json({ ok: true, mode: 'extension' })
+      return
+    }
+
     if (recorderProcess) { killChild(recorderProcess); recorderProcess = null }
 
     // Resolve recorder.cjs relative to this file:

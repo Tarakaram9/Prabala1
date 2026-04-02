@@ -278,9 +278,15 @@ export default function TestBuilderPage() {
   const [recordedCount, setRecordedCount] = useState(0)
   const [recorderError, setRecorderError] = useState<string | null>(null)
   const [scriptCopied, setScriptCopied] = useState(false)
-  const bookmarkletRef = useRef<HTMLAnchorElement>(null)
+  const [extensionConnected, setExtensionConnected] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Check extension status on mount and whenever recorder bar opens
+  useEffect(() => {
+    if (isElectron) return
+    api.extension.isConnected().then(setExtensionConnected)
+  }, [isElectron, recorderBarOpen, isRecording])
 
   // ─ Spy state ────────────────────────────────────────────────────────────
   const [spyTarget, setSpyTarget] = useState<{ stepId: string; key: string } | null>(null)
@@ -360,7 +366,7 @@ export default function TestBuilderPage() {
     scheduleAutoAnalysis('Recording completed', 500)
   }
 
-  // Copy the tiny loader snippet to clipboard so user can paste in browser console
+  // Copy the tiny loader snippet — fallback if extension is not installed
   function copyRecordingScript() {
     const origin = window.location.origin
     const snippet = `(function(){var s=document.createElement('script');s.src='${origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s)})();`
@@ -369,15 +375,6 @@ export default function TestBuilderPage() {
       setTimeout(() => setScriptCopied(false), 3000)
     })
   }
-
-  // Set bookmarklet href directly — React strips javascript: URIs as a security measure
-  useEffect(() => {
-    if (bookmarkletRef.current) {
-      const origin = window.location.origin
-      const code = `(function(){var s=document.createElement('script');s.src='${origin}/api/recorder/script?t='+Date.now();document.head.appendChild(s)})();`
-      bookmarkletRef.current.setAttribute('href', 'javascript:' + code)
-    }
-  }, [])
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
   function startSpy(stepId: string, key: string) {
@@ -1063,24 +1060,45 @@ steps:
 
             {/* Recorder bar — slides in below header */}
             {recorderBarOpen && !isRecording && (
-              <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 bg-red-950/30 border-b border-red-800/40">
-                <Circle size={13} className="text-red-400 flex-shrink-0" />
-                <span className="text-xs text-red-300 font-semibold flex-shrink-0">Record from URL</span>
-                <input
-                  className="input text-xs font-mono flex-1"
-                  value={recordUrl}
-                  onChange={e => setRecordUrl(e.target.value)}
-                  placeholder="https://example.com  (leave blank to record from any URL)"
-                  onKeyDown={e => { if (e.key === 'Enter') { startRecording(); setRecorderBarOpen(false) } }}
-                />
-                <button
-                  onClick={() => { startRecording(); setRecorderBarOpen(false) }}
-                  disabled={!tc}
-                  className="btn-primary flex items-center gap-1.5 py-1.5 text-xs flex-shrink-0 disabled:opacity-40"
-                >
-                  <Wifi size={12} /> Start Recording
-                </button>
-                <button onClick={() => setRecorderBarOpen(false)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
+              <div className="flex-shrink-0 flex flex-col gap-2 px-6 py-3 bg-red-950/30 border-b border-red-800/40">
+                <div className="flex items-center gap-3">
+                  <Circle size={13} className="text-red-400 flex-shrink-0" />
+                  <span className="text-xs text-red-300 font-semibold flex-shrink-0">Record from URL</span>
+                  <input
+                    className="input text-xs font-mono flex-1"
+                    value={recordUrl}
+                    onChange={e => setRecordUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    onKeyDown={e => { if (e.key === 'Enter') { startRecording(); setRecorderBarOpen(false) } }}
+                  />
+                  <button
+                    onClick={() => { startRecording(); setRecorderBarOpen(false) }}
+                    disabled={!tc}
+                    className="btn-primary flex items-center gap-1.5 py-1.5 text-xs flex-shrink-0 disabled:opacity-40"
+                  >
+                    <Wifi size={12} /> Start Recording
+                  </button>
+                  <button onClick={() => setRecorderBarOpen(false)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
+                </div>
+                {!isElectron && (
+                  <div className="flex items-center gap-2">
+                    {extensionConnected
+                      ? <span className="flex items-center gap-1.5 text-xs text-green-400"><CheckCircle2 size={11} /> Prabala Recorder extension connected — recording will start automatically</span>
+                      : <span className="text-xs text-amber-400">
+                          ⚠ Extension not installed.{' '}
+                          <a
+                            href={`${window.location.origin}/extension`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline text-purple-400 hover:text-purple-300"
+                          >How to install</a>
+                          {' '}· or paste a script in the console after clicking Start.
+                        </span>
+                    }
+                  </div>
+                )}
+              </div>
+            )}
               </div>
             )}
 
@@ -1104,7 +1122,7 @@ steps:
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
                   <div className="ml-auto flex items-center gap-2">
-                    {isElectron && (
+                    {(isElectron || extensionConnected) && (
                       <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
                     )}
                     <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
@@ -1112,12 +1130,12 @@ steps:
                     </button>
                   </div>
                 </div>
-                {/* Web mode: show script injection instructions */}
-                {!isElectron && (
+                {/* Web mode without extension: show manual console fallback */}
+                {!isElectron && !extensionConnected && (
                   <div className="flex flex-col gap-2 bg-slate-900/60 rounded-lg px-3 py-2.5 border border-slate-700/40">
-                    <p className="text-xs text-slate-300 font-semibold">Activate recording in the target tab:</p>
+                    <p className="text-xs text-amber-300 font-semibold">⚡ Extension not detected — activate recording manually:</p>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-xs text-slate-400">1. In the new tab, open DevTools → Console (F12)</span>
+                      <span className="text-xs text-slate-400">1. Open the new tab (F12 → Console)</span>
                       <button
                         onClick={copyRecordingScript}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-800/60 hover:bg-purple-700/60 text-purple-200 text-xs font-semibold transition-colors border border-purple-600/30"
@@ -1126,23 +1144,11 @@ steps:
                           ? <><CheckCircle2 size={11} className="text-green-400" /> Copied!</>
                           : <><Copy size={11} /> 2. Copy Script</>}
                       </button>
-                      <span className="text-xs text-slate-400">3. Paste &amp; press Enter → interact with your app</span>
+                      <span className="text-xs text-slate-400">3. Paste &amp; Enter → interact with your app</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500">One-time bookmarklet (drag to bookmarks bar):</span>
-                      {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
-                      <a
-                        ref={bookmarkletRef}
-                        draggable
-                        onClick={e => e.preventDefault()}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-orange-900/50 border border-orange-600/40 text-orange-300 text-xs cursor-grab select-none hover:bg-orange-800/50"
-                        title="Drag this to your bookmarks bar, then click it on any page to start recording"
-                      >
-                        🔴 PrabalaRec
-                      </a>
-                      <span className="text-xs text-slate-600">— click it on any page to start recording instantly</span>
-                    </div>
-                    <p className="text-xs text-slate-600">Steps appear here as you interact. Click Stop (above) or the purple badge in the tab when done.</p>
+                    <p className="text-xs text-slate-500">
+                      Install the <span className="text-purple-400 font-semibold">Prabala Recorder extension</span> to skip this step — recording will work exactly like Electron.
+                    </p>
                   </div>
                 )}
                 {recorderError && (
