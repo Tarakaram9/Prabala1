@@ -66,6 +66,33 @@ jobs:
           imageToDeploy: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           targetPort: 3000
 
+      # ── 5b. Re-apply Azure File Share mount at /workspaces ────────────────────
+      # container-apps-deploy-action may reset volumes; this step ensures the
+      # persistent File Share is always mounted after every deployment.
+      - name: Ensure persistent File Share is mounted
+        run: |
+          az containerapp show \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            -o yaml | python3 -c "
+import sys, yaml
+app = yaml.safe_load(sys.stdin)
+tmpl = app['properties']['template']
+vols = tmpl.get('volumes') or []
+if not any(v.get('name') == 'prabala-workspaces' for v in vols):
+    vols.append({'name': 'prabala-workspaces', 'storageType': 'AzureFile', 'storageName': 'prabala-workspaces'})
+tmpl['volumes'] = vols
+mnts = tmpl['containers'][0].get('volumeMounts') or []
+if not any(m.get('mountPath') == '/workspaces' for m in mnts):
+    mnts.append({'volumeName': 'prabala-workspaces', 'mountPath': '/workspaces'})
+tmpl['containers'][0]['volumeMounts'] = mnts
+print(yaml.dump(app, default_flow_style=False))
+" > /tmp/patched.yaml
+          az containerapp update \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --yaml /tmp/patched.yaml
+
       # ── 6. Print URL ──────────────────────────────────────────────────────────
       - name: Get App URL
         run: |
