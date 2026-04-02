@@ -29,7 +29,7 @@ export class WebDriverSession {
     }
 
     this._page = await this.context.newPage();
-    this._page.setDefaultTimeout(config.timeout ?? 30000);
+    this._page.setDefaultTimeout(config.timeout ?? 0); // 0 = no timeout (wait indefinitely)
   }
 
   get page(): Page {
