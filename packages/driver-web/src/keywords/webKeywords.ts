@@ -235,10 +235,9 @@ export const webKeywords: KeywordDefinition[] = [
     params: ['locator', 'timeout'],
     execute: async (params, context) => {
       const page = getPage(context);
-      const timeoutMs = params.timeout !== undefined && params.timeout !== ''
-        ? Number(params.timeout)
-        : 0  // 0 = no timeout in Playwright waitFor
-      await (await resolveLocator(page, params.locator, context)).waitFor({ state: 'visible', timeout: timeoutMs });
+      const opts: { state: 'visible'; timeout?: number } = { state: 'visible' }
+      if (params.timeout !== undefined && params.timeout !== '') opts.timeout = Number(params.timeout)
+      await (await resolveLocator(page, params.locator, context)).waitFor(opts);
     },
   },
   {
@@ -251,7 +250,7 @@ export const webKeywords: KeywordDefinition[] = [
         ? Number(params.timeout)
         : 0
       const loc = await resolveLocator(page, params.locator, context);
-      await loc.waitFor({ state: 'visible', timeout: timeoutMs });
+      await loc.waitFor({ state: 'visible' });
       // Poll isEnabled() since waitFor() only checks visibility, not enabled state
       const deadline = timeoutMs === 0 ? Infinity : Date.now() + timeoutMs;
       while (true) {
