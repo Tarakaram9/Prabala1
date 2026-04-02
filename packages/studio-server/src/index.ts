@@ -795,6 +795,9 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
       env: {
         ...process.env,
         NODE_PATH: monoRepoNodeModules,
+        // In Docker/container environments force headless so the Studio UI can
+        // stream a live screenshot preview rather than relying on Xvfb.
+        PRABALA_HEADLESS: process.env.NODE_ENV === 'production' ? '1' : (process.env.PRABALA_HEADLESS ?? ''),
       },
     })
 
@@ -869,7 +872,7 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
 
     spyProcess = spawn('node', [spyScript, ...spyArgs], {
       cwd: electronDir,
-      env: { ...process.env, NODE_PATH: monoRepoNodeModules },
+      env: { ...process.env, NODE_PATH: monoRepoNodeModules, PRABALA_HEADLESS: process.env.NODE_ENV === 'production' ? '1' : (process.env.PRABALA_HEADLESS ?? '') },
     })
 
     spyProcess.stdout?.on('data', (d: Buffer) => {

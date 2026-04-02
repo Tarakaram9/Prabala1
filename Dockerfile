@@ -102,6 +102,9 @@ USER prabala
 ENV PORT=3000
 ENV NODE_ENV=production
 ENV DISPLAY=:99
+# Force headless Chromium in Docker — the Studio UI streams live screenshots
+# and accepts pointer/keyboard commands via WebSocket instead.
+ENV PRABALA_HEADLESS=1
 
 EXPOSE 3000
 

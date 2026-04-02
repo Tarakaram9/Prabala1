@@ -333,16 +333,24 @@ const SPY_UI = `
 })();
 `;
 
+const os = require('os');
+const forceHeadless = process.env.PRABALA_HEADLESS === '1' ||
+  (os.platform() === 'linux' && !process.env.DISPLAY);
+
 async function run() {
+  const launchArgs = [
+    '--window-size=1280,820',
+    '--window-position=80,80',
+    '--disable-infobars',
+    '--disable-web-security',
+    '--disable-features=IsolateOrigins,site-per-process',
+  ];
+  if (os.platform() === 'linux') {
+    launchArgs.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
+  }
   const browser = await playwright.chromium.launch({
-    headless: false,
-    args: [
-      '--window-size=1280,820',
-      '--window-position=80,80',
-      '--disable-infobars',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
-    ],
+    headless: forceHeadless,
+    args: launchArgs,
   });
 
   // bypassCSP: true ensures page CSP headers cannot block our fetch() call
