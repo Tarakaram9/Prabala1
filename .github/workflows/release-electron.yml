@@ -49,6 +49,25 @@ jobs:
         run: npm install --save electron-updater --legacy-peer-deps
         working-directory: studio
 
+      - name: Generate app icons from SVG
+        run: |
+          npm install -g electron-icon-builder 2>/dev/null || true
+          # Convert SVG → 1024x1024 PNG first (requires Inkscape or rsvg on runner)
+          # macOS runner has rsvg-convert via homebrew; ubuntu has it in apt
+          if command -v rsvg-convert &>/dev/null; then
+            rsvg-convert -w 1024 -h 1024 studio/src/assets/icon.svg -o /tmp/icon-1024.png
+          elif command -v inkscape &>/dev/null; then
+            inkscape --export-type=png --export-width=1024 studio/src/assets/icon.svg -o /tmp/icon-1024.png
+          else
+            sudo apt-get install -y -qq librsvg2-bin 2>/dev/null || brew install librsvg 2>/dev/null || true
+            rsvg-convert -w 1024 -h 1024 studio/src/assets/icon.svg -o /tmp/icon-1024.png
+          fi
+          # Generate .ico, .icns and all PNG sizes
+          electron-icon-builder --input=/tmp/icon-1024.png --output=studio/src/assets/ --flatten 2>/dev/null || true
+          # Fallback: copy PNG directly so electron-builder at minimum has a png
+          cp /tmp/icon-1024.png studio/src/assets/icon.png 2>/dev/null || true
+        continue-on-error: true
+
       - name: Build core packages
         run: |
           npm run build -w packages/core

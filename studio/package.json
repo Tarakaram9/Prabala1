@@ -46,17 +46,21 @@
   "build": {
     "appId": "io.prabala.studio",
     "productName": "Prabala",
+    "icon": "src/assets/icon",
     "directories": {
       "output": "release"
     },
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "src/assets/icons/mac/icon.icns",
       "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
     },
     "win": {
+      "icon": "src/assets/icons/win/icon.ico",
       "target": "nsis"
     },
     "linux": {
+      "icon": "src/assets/icons/png",
       "target": "AppImage"
     },
     "publish": {
