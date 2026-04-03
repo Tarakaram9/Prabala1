@@ -45,7 +45,7 @@
   },
   "build": {
     "appId": "io.prabala.studio",
-    "productName": "Prabala Studio",
+    "productName": "Prabala",
     "directories": {
       "output": "release"
     },
