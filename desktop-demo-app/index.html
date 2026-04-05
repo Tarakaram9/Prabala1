@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prabala Task Manager</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ══════════════════════ LOGIN VIEW ══════════════════════ -->
+<div id="login-view" class="view active" aria-label="Login Screen">
+  <div class="login-card">
+    <div class="login-logo" aria-label="App Logo">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <rect width="48" height="48" rx="12" fill="#6366f1"/>
+        <path d="M12 24L20 32L36 16" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1 class="login-title" aria-label="App Title">Prabala Task Manager</h1>
+    <p class="login-subtitle" aria-label="Login Subtitle">Sign in to manage your tasks</p>
+
+    <div id="login-error" class="error-banner hidden" role="alert" aria-label="Login Error Message"></div>
+
+    <div class="form-group">
+      <label for="username-input" class="form-label">Username</label>
+      <input
+        id="username-input"
+        type="text"
+        class="form-input"
+        aria-label="Username"
+        placeholder="Enter your username"
+        autocomplete="username"
+      />
+    </div>
+    <div class="form-group">
+      <label for="password-input" class="form-label">Password</label>
+      <input
+        id="password-input"
+        type="password"
+        class="form-input"
+        aria-label="Password"
+        placeholder="Enter your password"
+        autocomplete="current-password"
+      />
+    </div>
+    <button id="login-btn" class="btn btn-primary btn-full" aria-label="Login">
+      Sign In
+    </button>
+    <p class="login-hint" aria-label="Login Hint">Demo: admin / admin123 &nbsp;·&nbsp; user / user123</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════ MAIN APP VIEW ══════════════════════ -->
+<div id="app-view" class="view hidden" aria-label="Main Application">
+
+  <!-- ── Sidebar Navigation ──────────────────────────────── -->
+  <nav class="sidebar" aria-label="Sidebar Navigation">
+    <div class="sidebar-header">
+      <svg width="28" height="28" viewBox="0 0 48 48" fill="none">
+        <rect width="48" height="48" rx="12" fill="#6366f1"/>
+        <path d="M12 24L20 32L36 16" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="sidebar-brand" aria-label="Brand Name">TaskManager</span>
+    </div>
+
+    <div class="nav-items">
+      <button class="nav-item active" id="nav-tasks" aria-label="Tasks Tab" data-view="tasks-view">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+        </svg>
+        Tasks
+      </button>
+      <button class="nav-item" id="nav-contacts" aria-label="Contacts Tab" data-view="contacts-view">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+        Contacts
+      </button>
+      <button class="nav-item" id="nav-settings" aria-label="Settings Tab" data-view="settings-view">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar" id="user-avatar" aria-label="User Avatar">A</div>
+        <span class="user-name" id="user-name" aria-label="Current User">Admin</span>
+      </div>
+      <button id="logout-btn" class="btn-logout" aria-label="Logout" title="Logout">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+        </svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ── Content Area ─────────────────────────────────────── -->
+  <main class="content" aria-label="Content Area">
+
+    <!-- TASKS VIEW ─────────────────────────────────────────── -->
+    <section id="tasks-view" class="content-view active" aria-label="Tasks View">
+      <div class="content-header">
+        <div>
+          <h2 class="content-title" aria-label="Tasks Heading">My Tasks</h2>
+          <p class="content-subtitle" id="task-count-label" aria-label="Task Count">0 tasks total</p>
+        </div>
+        <button id="add-task-btn" class="btn btn-primary" aria-label="Add Task">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Add Task
+        </button>
+      </div>
+
+      <!-- Add / Edit Task Form (inline) -->
+      <div id="task-form-panel" class="form-panel hidden" aria-label="Task Form">
+        <h3 class="panel-title" id="task-form-title" aria-label="Task Form Title">New Task</h3>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Task Title</label>
+            <input id="task-title-input" type="text" class="form-input" aria-label="Task Title" placeholder="What needs to be done?" />
+          </div>
+          <div class="form-group" style="width:160px">
+            <label class="form-label">Priority</label>
+            <select id="task-priority-select" class="form-select" aria-label="Task Priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="form-group" style="width:180px">
+            <label class="form-label">Due Date</label>
+            <input id="task-due-date" type="date" class="form-input" aria-label="Due Date" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button id="save-task-btn" class="btn btn-primary" aria-label="Save Task">Save Task</button>
+          <button id="cancel-task-btn" class="btn btn-ghost" aria-label="Cancel Task">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Filter Tabs -->
+      <div class="filter-tabs" aria-label="Task Filter Tabs">
+        <button class="filter-tab active" id="filter-all" aria-label="All Tasks" data-filter="all">All</button>
+        <button class="filter-tab" id="filter-active" aria-label="Active Tasks" data-filter="active">Active</button>
+        <button class="filter-tab" id="filter-done" aria-label="Completed Tasks" data-filter="done">Completed</button>
+      </div>
+
+      <!-- Task List -->
+      <div id="task-list" class="task-list" aria-label="Task List">
+        <p class="empty-state" id="task-empty" aria-label="No Tasks Message">No tasks yet. Click "Add Task" to get started.</p>
+      </div>
+    </section>
+
+
+    <!-- CONTACTS VIEW ──────────────────────────────────────── -->
+    <section id="contacts-view" class="content-view hidden" aria-label="Contacts View">
+      <div class="content-header">
+        <div>
+          <h2 class="content-title" aria-label="Contacts Heading">Contacts</h2>
+          <p class="content-subtitle" id="contact-count-label" aria-label="Contact Count">0 contacts</p>
+        </div>
+        <button id="add-contact-btn" class="btn btn-primary" aria-label="Add Contact">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Add Contact
+        </button>
+      </div>
+
+      <!-- Add Contact Form Panel -->
+      <div id="contact-form-panel" class="form-panel hidden" aria-label="Contact Form">
+        <h3 class="panel-title" aria-label="Contact Form Title">New Contact</h3>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Full Name</label>
+            <input id="contact-name-input" type="text" class="form-input" aria-label="Contact Name" placeholder="Full name" />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">Email</label>
+            <input id="contact-email-input" type="email" class="form-input" aria-label="Contact Email" placeholder="email@example.com" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Phone</label>
+            <input id="contact-phone-input" type="tel" class="form-input" aria-label="Contact Phone" placeholder="+1 (555) 000-0000" />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">Department</label>
+            <select id="contact-dept-select" class="form-select" aria-label="Contact Department">
+              <option value="">Select department</option>
+              <option value="engineering">Engineering</option>
+              <option value="marketing">Marketing</option>
+              <option value="sales">Sales</option>
+              <option value="hr">HR</option>
+              <option value="finance">Finance</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button id="save-contact-btn" class="btn btn-primary" aria-label="Save Contact">Save Contact</button>
+          <button id="cancel-contact-btn" class="btn btn-ghost" aria-label="Cancel Contact">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Contacts Grid -->
+      <div id="contact-list" class="contact-grid" aria-label="Contact List">
+        <p class="empty-state" id="contact-empty" aria-label="No Contacts Message">No contacts yet. Click "Add Contact" to add someone.</p>
+      </div>
+    </section>
+
+
+    <!-- SETTINGS VIEW ──────────────────────────────────────── -->
+    <section id="settings-view" class="content-view hidden" aria-label="Settings View">
+      <div class="content-header">
+        <div>
+          <h2 class="content-title" aria-label="Settings Heading">Settings</h2>
+          <p class="content-subtitle">Manage your preferences</p>
+        </div>
+      </div>
+
+      <div class="settings-card" aria-label="Profile Settings">
+        <h3 class="settings-section-title" aria-label="Profile Section">Profile</h3>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Display Name</label>
+            <input id="display-name-input" type="text" class="form-input" aria-label="Display Name" placeholder="Your display name" />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">Email Address</label>
+            <input id="profile-email-input" type="email" class="form-input" aria-label="Profile Email" placeholder="your@email.com" />
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-card" aria-label="Notifications Settings">
+        <h3 class="settings-section-title" aria-label="Notifications Section">Notifications</h3>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="toggle-label" aria-label="Enable Notifications Label">Enable Notifications</span>
+            <span class="toggle-desc">Receive alerts for due tasks</span>
+          </div>
+          <label class="toggle-switch" aria-label="Enable Notifications">
+            <input type="checkbox" id="notifications-toggle" aria-label="Enable Notifications" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="toggle-label" aria-label="Email Reminders Label">Email Reminders</span>
+            <span class="toggle-desc">Send daily task digest by email</span>
+          </div>
+          <label class="toggle-switch" aria-label="Email Reminders">
+            <input type="checkbox" id="email-reminders-toggle" aria-label="Email Reminders" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-card" aria-label="Appearance Settings">
+        <h3 class="settings-section-title" aria-label="Appearance Section">Appearance</h3>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="toggle-label" aria-label="Dark Mode Label">Dark Mode</span>
+            <span class="toggle-desc">Use dark colour scheme</span>
+          </div>
+          <label class="toggle-switch" aria-label="Dark Mode">
+            <input type="checkbox" id="dark-mode-toggle" aria-label="Dark Mode" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label">Language</label>
+          <select id="language-select" class="form-select" aria-label="Language">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:8px">
+        <button id="save-settings-btn" class="btn btn-primary" aria-label="Save Settings">Save Settings</button>
+        <div id="settings-saved-msg" class="success-msg hidden" aria-label="Settings Saved Message">Settings saved!</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ══════════════════════ TOAST NOTIFICATION ══════════════════════ -->
+<div id="toast" class="toast hidden" role="status" aria-label="Notification Toast"></div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

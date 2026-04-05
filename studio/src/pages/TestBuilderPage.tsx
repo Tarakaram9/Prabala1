@@ -5,7 +5,7 @@ import {
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
   CheckCircle2, AlertCircle, Loader2, Brain, Send, Sparkles,
   X, ChevronLeft, Zap, ClipboardList, Wand2, Database, AtSign, Puzzle, Crosshair,
-  Eye, EyeOff, RefreshCw, RotateCcw
+  Eye, EyeOff, RefreshCw, RotateCcw, Monitor
 } from 'lucide-react'
 import yaml from 'js-yaml'
 import TestExplorer from '../components/TestExplorer'
@@ -264,6 +264,8 @@ export default function TestBuilderPage() {
     return () => {
       api.recorder.stop().catch(() => {})
       api.recorder.removeAllListeners()
+      api.desktopRecorder.stop().catch(() => {})
+      api.desktopRecorder.removeAllListeners()
       api.spy.removeAllListeners()
     }
   }, [])
@@ -279,6 +281,16 @@ export default function TestBuilderPage() {
   const [recorderError, setRecorderError] = useState<string | null>(null)
   const [recorderScreenshot, setRecorderScreenshot] = useState<string | null>(null)
   const recorderImgRef = useRef<HTMLImageElement>(null)
+
+  // ─ Desktop Recording state ───────────────────────────────────────────────
+  const [isDesktopRecording, setIsDesktopRecording] = useState(false)
+  const [desktopRecorderBarOpen, setDesktopRecorderBarOpen] = useState(false)
+  const [selectedAppPath, setSelectedAppPath] = useState<string | null>(null)
+  // desktopAppiumUrl removed — recorder no longer uses Appium
+  const [desktopRecordedCount, setDesktopRecordedCount] = useState(0)
+  const [desktopRecorderError, setDesktopRecorderError] = useState<string | null>(null)
+  const [desktopRecorderScreenshot, setDesktopRecorderScreenshot] = useState<string | null>(null)
+
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -327,6 +339,7 @@ export default function TestBuilderPage() {
     api.recorder.removeAllListeners()
     api.recorder.onStep((step: { keyword: string; params: Record<string, string> }) => {
       ingestStep(step)
+      setRecordedCount(n => n + 1)
     })
     api.recorder.onDone(() => {
       setIsRecording(false)
@@ -367,6 +380,68 @@ export default function TestBuilderPage() {
 
     // Immediately trigger AI analysis when recording is done (no debounce)
     scheduleAutoAnalysis('Recording completed', 500)
+  }
+
+  // ─ Desktop Recording ─────────────────────────────────────────────────────
+  function openDesktopRecorderBar() {
+    setDesktopRecorderBarOpen(o => !o)
+    setDesktopRecorderError(null)
+  }
+
+  async function browseForApp() {
+    try {
+      const p = await api.dialog.openFile([
+        { name: 'Applications', extensions: ['app', 'exe'] },
+        { name: 'All Files', extensions: ['*'] },
+      ])
+      if (p) setSelectedAppPath(p)
+    } catch { /* ignore — dialog not available in web mode */ }
+  }
+
+  async function doStartDesktopRecording() {
+    if (!tc || !selectedAppPath) return
+
+    setDesktopRecordedCount(0)
+    setDesktopRecorderError(null)
+    setDesktopRecorderScreenshot(null)
+    setIsDesktopRecording(true)
+    setDesktopRecorderBarOpen(false)
+
+    api.desktopRecorder.removeAllListeners()
+    api.desktopRecorder.onStep((step: { keyword: string; params: Record<string, string> }) => {
+      ingestStep(step)
+      setDesktopRecordedCount(n => n + 1)
+    })
+    api.desktopRecorder.onDone(() => {
+      setIsDesktopRecording(false)
+      setDesktopRecorderScreenshot(null)
+      api.desktopRecorder.removeAllListeners()
+      scheduleAutoAnalysis('Desktop recording completed', 500)
+    })
+    api.desktopRecorder.onError((msg: string) => {
+      console.error('[DesktopRecorder] error:', msg)
+      setDesktopRecorderError(msg)
+      setIsDesktopRecording(false)
+    })
+    api.desktopRecorder.onScreenshot((frame) => {
+      setDesktopRecorderScreenshot(`data:image/png;base64,${frame.__screenshot}`)
+    })
+
+    try {
+      await api.desktopRecorder.start(selectedAppPath)
+    } catch (err: any) {
+      setDesktopRecorderError(err?.message || 'Failed to start desktop recorder')
+      setIsDesktopRecording(false)
+    }
+  }
+
+  function stopDesktopRecording() {
+    api.desktopRecorder.stop().catch(() => {})
+    api.desktopRecorder.removeAllListeners()
+    setIsDesktopRecording(false)
+    setDesktopRecorderError(null)
+    setDesktopRecorderScreenshot(null)
+    scheduleAutoAnalysis('Desktop recording completed', 500)
   }
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
@@ -420,7 +495,6 @@ export default function TestBuilderPage() {
     const step = newStep(raw.keyword)
     step.params = { ...step.params, ...raw.params }
     appendStepToActive(step)
-    setRecordedCount(n => n + 1)
     // Debounce more aggressively during burst recording (3s)
     scheduleAutoAnalysis(`Recorded: ${raw.keyword}`, 3000)
   }
@@ -461,6 +535,12 @@ export default function TestBuilderPage() {
   function addNewTestCaseInFolder(folderPath: string) {
     const base = newTestCase()
     const tc2 = { ...base, filePath: `${folderPath}/new-test-${Date.now()}.yaml` }
+    // Register the folder path in the store so buildTree shows it immediately
+    // (even before the test is saved to disk and a rescan discovers it)
+    const { testFolders, setTestFolders } = useAppStore.getState()
+    if (!testFolders.includes(folderPath)) {
+      setTestFolders([...testFolders, folderPath])
+    }
     setTestCases([...testCases, tc2])
     setActiveTestCase(tc2)
   }
@@ -1015,6 +1095,28 @@ steps:
                   </button>
                 )}
 
+
+                {/* ▶ Desktop Record button */}
+                {!isDesktopRecording ? (
+                  <button
+                    onClick={openDesktopRecorderBar}
+                    disabled={!tc}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-surface-600 hover:bg-orange-900/40 text-slate-300 hover:text-orange-300 border border-surface-400 disabled:opacity-40"
+                    title="Browse for .app / .exe and start recording desktop actions"
+                  >
+                    <Monitor size={11} className="text-slate-400" />
+                    Desktop Record
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopDesktopRecording}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-700/50 hover:bg-orange-700/70 text-orange-200 border border-orange-600/50 transition-colors"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                    Stop ({desktopRecordedCount})
+                  </button>
+                )}
+
                 <button
                   onClick={saveTestCase}
                   disabled={saveStatus === 'saving'}
@@ -1050,6 +1152,45 @@ steps:
                 </button>
               </div>
             </div>
+
+            {/* Desktop Recorder bar — settings before starting */}
+            {desktopRecorderBarOpen && !isDesktopRecording && (
+              <div className="flex-shrink-0 flex flex-col gap-2 px-6 py-3 bg-orange-950/30 border-b border-orange-800/40">
+                <div className="flex items-center gap-3">
+                  <Monitor size={13} className="text-orange-400 flex-shrink-0" />
+                  <span className="text-xs text-orange-300 font-semibold flex-shrink-0">Desktop Record</span>
+                  <button
+                    onClick={browseForApp}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-orange-900/40 hover:bg-orange-800/60 text-orange-300 text-xs border border-orange-700/40 flex-shrink-0 transition-colors"
+                  >
+                    Browse…
+                  </button>
+                  {selectedAppPath ? (
+                    <span className="text-xs text-slate-300 font-mono truncate max-w-[200px]" title={selectedAppPath}>
+                      {selectedAppPath.split(/[/\\]/).pop()}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">No app selected</span>
+                  )}
+                  <span className="text-xs text-slate-500 ml-2 italic">No Appium required — uses native OS accessibility</span>
+                  <button
+                    onClick={doStartDesktopRecording}
+                    disabled={!selectedAppPath}
+                    className="btn-primary flex items-center gap-1.5 py-1.5 text-xs flex-shrink-0 disabled:opacity-40"
+                  >
+                    <Monitor size={11} /> Start Recording
+                  </button>
+                  <button onClick={() => { setDesktopRecorderBarOpen(false); setDesktopRecorderError(null) }} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
+                </div>
+                {desktopRecorderError && (
+                  <div className="flex items-center gap-2 text-xs text-orange-300 bg-orange-900/40 rounded px-3 py-1.5 border border-orange-700/40">
+                    <AlertCircle size={12} className="flex-shrink-0" />
+                    <span className="flex-1">{desktopRecorderError}</span>
+                    <button onClick={() => setDesktopRecorderError(null)} className="text-orange-600 hover:text-orange-300">×</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Recorder bar — slides in below header */}
             {recorderBarOpen && !isRecording && (
@@ -1152,6 +1293,50 @@ steps:
 
                 {recorderError && (
                   <div className="text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">{recorderError}</div>
+                )}
+              </div>
+            )}
+
+            {/* Desktop Recording live banner */}
+            {(isDesktopRecording || desktopRecorderError) && (
+              <div className="flex-shrink-0 flex flex-col gap-2 px-4 py-3 bg-orange-950/50 border-b border-orange-700/50">
+                <div className="flex items-center gap-3">
+                  {isDesktopRecording ? (
+                    <>
+                      <span className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse flex-shrink-0" />
+                      <span className="text-xs text-orange-300 font-semibold">Desktop Recording…</span>
+                      <span className="text-xs text-slate-400">{desktopRecordedCount} step{desktopRecordedCount !== 1 ? 's' : ''} captured</span>
+                      <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{selectedAppPath ? selectedAppPath.split(/[\/\\]/).pop() : ''}</span>
+                      <div className="ml-auto flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Interact with your desktop app</span>
+                        <button onClick={stopDesktopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-orange-800/50 hover:bg-orange-800/80 text-orange-300 text-xs transition-colors">
+                          <Square size={11} /> Stop
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle size={13} className="text-orange-400 flex-shrink-0" />
+                      <span className="text-xs text-orange-300 font-semibold">Desktop Recorder</span>
+                      <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{selectedAppPath ? selectedAppPath.split(/[\/\\]/).pop() : ''}</span>
+                      <button onClick={() => setDesktopRecorderError(null)} className="ml-auto text-slate-500 hover:text-slate-300 text-xs">×</button>
+                    </>
+                  )}
+                </div>
+                {desktopRecorderScreenshot && (
+                  <div className="relative rounded overflow-hidden border border-orange-700/40 bg-black">
+                    <img src={desktopRecorderScreenshot} alt="Desktop app preview"
+                      className="w-full h-full object-contain" draggable={false} />
+                    <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] text-slate-400">
+                      Live preview
+                    </div>
+                  </div>
+                )}
+                {desktopRecorderError && (
+                  <div className="flex items-center gap-2 text-xs text-orange-300 bg-orange-900/40 rounded px-3 py-1.5 border border-orange-700/40">
+                    <span className="flex-1">{desktopRecorderError}</span>
+                    <button onClick={() => setDesktopRecorderError(null)} className="text-orange-600 hover:text-orange-300 flex-shrink-0">×</button>
+                  </div>
                 )}
               </div>
             )}

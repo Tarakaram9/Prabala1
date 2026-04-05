@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@prabala/core": "*",
+    "@prabala/driver-api": "*",
     "@prabala/driver-web": "*",
     "@prabala/reporting": "*",
     "commander": "^12.0.0",

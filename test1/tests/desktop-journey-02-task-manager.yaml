@@ -1,0 +1,194 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Journey 02 – Task Manager (Add / Complete / Edit / Delete)
+#
+# Covers:
+#   • Logging in as admin (demo data pre-seeded)
+#   • Adding a new high-priority task with a due date
+#   • Completing a task by clicking its checkbox
+#   • Editing a task title and priority
+#   • Deleting a task
+#   • Verifying filter tabs (Active / Completed)
+#
+# Pre-requisites: same as Journey 01 — app built, Appium running
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Desktop - Task Manager Journey
+description: Add, complete, edit, and delete tasks in the Task Manager
+
+variables:
+  APP_PATH: ../desktop-demo-app/dist/mac/PrabalaTaskManager.app
+  NEW_TASK_TITLE: Buy weekly groceries
+  EDITED_TASK_TITLE: Buy weekly groceries (done)
+
+steps:
+
+  # ── Launch and login ───────────────────────────────────────────────────────
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: ${APP_PATH}
+    description: Launch Prabala Task Manager demo app
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Login Screen
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      text: admin
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      text: admin123
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Tasks View
+    description: Wait for the Tasks view to load
+
+  # ── Verify pre-seeded demo tasks are visible ───────────────────────────────
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Task List
+    description: Task list should be visible
+
+  - keyword: Desktop.AssertContainsText
+    params:
+      locator: name=Task Count
+      expected: tasks total
+    description: Task count label should reflect pre-seeded tasks
+
+  # ── Add a new task ─────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Add Task
+    description: Open the Add Task form
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Task Form
+    description: Task form panel should appear
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Task Title
+      text: ${NEW_TASK_TITLE}
+    description: Enter the task title
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Task Priority
+    description: Open the priority dropdown
+
+  # Select "high" from the priority dropdown
+  # On macOS the select renders as a native combo box; click the option by label
+  - keyword: Desktop.Click
+    params:
+      locator: name=High
+    description: Select High priority
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Due Date
+      text: 2026-04-30
+    description: Set due date
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Task
+    description: Save the new task
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: "name=Task: ${NEW_TASK_TITLE}"
+    description: Newly created task should appear in the list
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: "name=Task: ${NEW_TASK_TITLE}"
+    description: Verify new task card is visible
+
+  # ── Complete a task ────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: "name=Complete ${NEW_TASK_TITLE}"
+    description: Click the checkbox to mark the task complete
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: "name=Mark Incomplete ${NEW_TASK_TITLE}"
+    description: After completing, checkbox aria-label should change to Mark Incomplete
+
+  # ── Filter to Active tasks (completed task hides) ──────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Active Tasks
+    description: Click the Active filter tab
+
+  - keyword: Desktop.AssertNotVisible
+    params:
+      locator: "name=Task: ${NEW_TASK_TITLE}"
+    description: Completed task should not appear in Active filter
+
+  # ── Switch back to All tasks ───────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=All Tasks
+    description: Click the All filter tab
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: "name=Task: ${NEW_TASK_TITLE}"
+    description: Task should reappear in All view
+
+  # ── Edit a task ────────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: "name=Edit ${NEW_TASK_TITLE}"
+    description: Click the edit (pencil) button for the task
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Task Form
+    description: Task form should open for editing
+
+  - keyword: Desktop.ClearText
+    params:
+      locator: name=Task Title
+    description: Clear the current title
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Task Title
+      text: ${EDITED_TASK_TITLE}
+    description: Enter the updated title
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Task
+    description: Save the edited task
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: "name=Task: ${EDITED_TASK_TITLE}"
+    description: Task should appear with the updated title
+
+  # ── Delete a task ──────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: "name=Delete ${EDITED_TASK_TITLE}"
+    description: Click the delete (trash) button
+
+  - keyword: Desktop.AssertNotVisible
+    params:
+      locator: "name=Task: ${EDITED_TASK_TITLE}"
+    description: Deleted task should no longer appear in the list
+
+  # ── Teardown ───────────────────────────────────────────────────────────────
+  - keyword: Desktop.CloseApp
+    description: Close the application

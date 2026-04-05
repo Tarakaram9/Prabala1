@@ -28,9 +28,9 @@ export function buildTree(testCases: TestCase[], testsRoot: string, extraFolders
 
   function getNode(dirPath: string): FolderNode {
     if (map.has(dirPath)) return map.get(dirPath)!
-    // Clamp: parent must be inside testsRoot
+    // Clamp: parent must be inside testsRoot (use proper prefix check, not string comparison)
     const parentPath = dirPath.substring(0, dirPath.lastIndexOf('/'))
-    const parent = getNode(parentPath >= testsRoot ? parentPath : testsRoot)
+    const parent = getNode(parentPath.startsWith(testsRoot) ? parentPath : testsRoot)
     const node: FolderNode = { name: dirPath.split('/').pop()!, path: dirPath, children: [], tests: [] }
     map.set(dirPath, node)
     parent.children.push(node)
@@ -95,6 +95,7 @@ interface MonitorProps extends BaseProps {
   mode: 'monitor'
   selected: Set<string>
   onToggleTest: (filePath: string) => void
+  onToggleFolderTests?: (filePaths: string[], forceOn?: boolean) => void
   allSelected: boolean
   someSelected: boolean
   onToggleAll: () => void
@@ -117,13 +118,16 @@ export default function TestExplorer(props: TestExplorerProps) {
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const [renaming, setRenaming] = useState<{ path: string; type: 'folder' | 'test'; current: string } | null>(null)
   const [creating, setCreating] = useState<{ parentPath: string} | null>(null)
-  const [newFolderName, setNewFolderName] = useState('')
   const [renameValue, setRenameValue] = useState('')
   const [dragTc, setDragTc] = useState<TestCase | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showMoveMenu, setShowMoveMenu] = useState(false)
   const [explorerError, setExplorerError] = useState<string | null>(null)
+
+  // Use a ref for the new-folder name so typing doesn't trigger re-renders
+  // (which would destroy the input and lose focus on every keystroke)
+  const newFolderNameRef = useRef('')
 
   const ctxRef = useRef<HTMLDivElement>(null)
   const renameRef = useRef<HTMLInputElement>(null)
@@ -145,6 +149,19 @@ export default function TestExplorer(props: TestExplorerProps) {
   // Focus rename input when it appears
   useEffect(() => { if (renaming) setTimeout(() => renameRef.current?.select(), 50) }, [renaming])
 
+  // Focus & clear the create input whenever a new create session starts
+  useEffect(() => {
+    if (creating) {
+      newFolderNameRef.current = ''
+      setTimeout(() => {
+        if (createRef.current) {
+          createRef.current.value = ''
+          createRef.current.focus()
+        }
+      }, 30)
+    }
+  }, [creating])
+
   // ── Tree helpers ─────────────────────────────────────────────────────────────
   const toggleCollapse = (path: string) =>
     setCollapsed(s => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n })
@@ -153,6 +170,14 @@ export default function TestExplorer(props: TestExplorerProps) {
     e.preventDefault(); e.stopPropagation()
     setCtx({ x: e.clientX, y: e.clientY, target })
     setShowMoveMenu(false)
+  }
+
+  /** Collect all test filePaths in a node subtree (recursive) */
+  function allTestsInNode(node: FolderNode): string[] {
+    return [
+      ...node.tests.map(tc => tc.filePath),
+      ...node.children.flatMap(allTestsInNode),
+    ]
   }
 
   // ── Operations ───────────────────────────────────────────────────────────────
@@ -168,7 +193,7 @@ export default function TestExplorer(props: TestExplorerProps) {
     } finally {
       setBusy(false)
       setCreating(null)
-      setNewFolderName('')
+      newFolderNameRef.current = ''
       await onRescan()
     }
   }, [ipc, onRescan])
@@ -268,15 +293,35 @@ export default function TestExplorer(props: TestExplorerProps) {
     const isCollapsed = collapsed.has(node.path)
     const isDragTarget = dragOver === node.path
     const indentPx = depth * 12
+    const isMonitor = props.mode === 'monitor'
+
+    // In monitor mode: compute selection state for this folder's subtree
+    const folderFilePaths = isMonitor ? allTestsInNode(node) : []
+    const folderAllChecked = isMonitor && folderFilePaths.length > 0
+      && folderFilePaths.every(fp => (props as MonitorProps).selected.has(fp))
+    const folderSomeChecked = isMonitor && !folderAllChecked
+      && folderFilePaths.some(fp => (props as MonitorProps).selected.has(fp))
 
     return (
       <div key={node.path}>
         {/* Folder header */}
         {!isRoot && (
           <div
-            className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-lg mx-1 cursor-pointer select-none transition-colors hover:bg-surface-700 ${isDragTarget ? 'bg-brand-900/30 ring-1 ring-brand-500/40' : ''}`}
+            className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-lg mx-1 cursor-pointer select-none transition-colors hover:bg-surface-700 ${isDragTarget ? 'bg-brand-900/30 ring-1 ring-brand-500/40' : ''} ${folderAllChecked ? 'bg-brand-900/10' : ''}`}
             style={{ paddingLeft: `${8 + indentPx}px` }}
-            onClick={() => toggleCollapse(node.path)}
+            onClick={() => {
+              if (isMonitor) {
+                // Click folder = toggle all tests in subtree
+                const mp = props as MonitorProps
+                if (mp.onToggleFolderTests) {
+                  mp.onToggleFolderTests(folderFilePaths, !folderAllChecked)
+                } else {
+                  folderFilePaths.forEach(fp => mp.onToggleTest(fp))
+                }
+              } else {
+                toggleCollapse(node.path)
+              }
+            }}
             onContextMenu={e => openCtx(e, { type: 'folder', node })}
             onDragOver={e => { e.preventDefault(); setDragOver(node.path) }}
             onDragLeave={() => setDragOver(null)}
@@ -302,9 +347,20 @@ export default function TestExplorer(props: TestExplorerProps) {
               </>
             ) : (
               <>
-                {isCollapsed
-                  ? <ChevronRight size={11} className="text-slate-600 flex-shrink-0" />
-                  : <ChevronDown size={11} className="text-slate-600 flex-shrink-0" />}
+                {/* In monitor mode show checkbox; in builder mode show collapse arrow */}
+                {isMonitor ? (
+                  <div className="flex-shrink-0 text-slate-500">
+                    {folderAllChecked
+                      ? <CheckSquare size={12} className="text-brand-400" />
+                      : folderSomeChecked
+                      ? <Minus size={12} className="text-brand-400/60" />
+                      : <SquareIcon size={12} />}
+                  </div>
+                ) : (
+                  isCollapsed
+                    ? <ChevronRight size={11} className="text-slate-600 flex-shrink-0" />
+                    : <ChevronDown size={11} className="text-slate-600 flex-shrink-0" />
+                )}
                 {isCollapsed
                   ? <Folder size={13} className="text-amber-400/70 flex-shrink-0" />
                   : <FolderOpen size={13} className="text-amber-400 flex-shrink-0" />}
@@ -312,23 +368,43 @@ export default function TestExplorer(props: TestExplorerProps) {
                 <span className="text-[10px] text-slate-600 flex-shrink-0 group-hover:hidden">
                   {node.tests.length + node.children.reduce((a, c) => a + c.tests.length, 0)}
                 </span>
-                <div className="hidden group-hover:flex gap-0.5 flex-shrink-0">
+                {/* Builder-only folder actions */}
+                {!isMonitor && (
+                  <div className="hidden group-hover:flex gap-0.5 flex-shrink-0">
+                    <button
+                      onClick={e => { e.stopPropagation(); (props as BuilderProps).onCreateTest(node.path) }}
+                      className="p-0.5 rounded hover:bg-surface-500 text-slate-500 hover:text-green-400"
+                      title="New test case in this folder"
+                    ><Plus size={11} /></button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setCreating({ parentPath: node.path }); newFolderNameRef.current = '' }}
+                      className="p-0.5 rounded hover:bg-surface-500 text-slate-500 hover:text-brand-300"
+                      title="New subfolder"
+                    ><FolderPlus size={11} /></button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setRenaming({ type: 'folder', path: node.path, current: node.name }); setRenameValue(node.name) }}
+                      className="p-0.5 rounded hover:bg-surface-500 text-slate-500 hover:text-slate-300"
+                      title="Rename folder"
+                    ><Edit2 size={11} /></button>
+                    <button
+                      onClick={e => { e.stopPropagation(); doDeleteFolder(node.path) }}
+                      className="p-0.5 rounded hover:bg-red-900/40 text-slate-500 hover:text-red-400"
+                      title="Delete folder"
+                    ><Trash2 size={11} /></button>
+                  </div>
+                )}
+                {/* Monitor-mode: collapse toggle button */}
+                {isMonitor && (
                   <button
-                    onClick={e => { e.stopPropagation(); setCreating({ parentPath: node.path }); setNewFolderName('') }}
-                    className="p-0.5 rounded hover:bg-surface-500 text-slate-500 hover:text-brand-300"
-                    title="New subfolder"
-                  ><FolderPlus size={11} /></button>
-                  <button
-                    onClick={e => { e.stopPropagation(); setRenaming({ type: 'folder', path: node.path, current: node.name }); setRenameValue(node.name) }}
-                    className="p-0.5 rounded hover:bg-surface-500 text-slate-500 hover:text-slate-300"
-                    title="Rename folder"
-                  ><Edit2 size={11} /></button>
-                  <button
-                    onClick={e => { e.stopPropagation(); doDeleteFolder(node.path) }}
-                    className="p-0.5 rounded hover:bg-red-900/40 text-slate-500 hover:text-red-400"
-                    title="Delete folder"
-                  ><Trash2 size={11} /></button>
-                </div>
+                    onClick={e => { e.stopPropagation(); toggleCollapse(node.path) }}
+                    className="p-0.5 rounded hover:bg-surface-500 text-slate-600 flex-shrink-0"
+                    title={isCollapsed ? 'Expand' : 'Collapse'}
+                  >
+                    {isCollapsed
+                      ? <ChevronRight size={10} />
+                      : <ChevronDown size={10} />}
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -337,8 +413,9 @@ export default function TestExplorer(props: TestExplorerProps) {
         {/* Folder contents */}
         {(isRoot || !isCollapsed) && (
           <div>
-            {/* Inline new-folder input – rendered as plain JSX (NOT a sub-component) so it
-                never remounts on keystroke, keeping focus and value intact */}
+            {/* Inline new-folder input – uses an uncontrolled input (ref-based) so
+                typing does NOT trigger React state updates, which would remount the
+                input DOM node and lose focus on every keystroke */}
             {creating?.parentPath === node.path && (
               <div
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-700/50 mx-2 rounded-lg"
@@ -348,23 +425,22 @@ export default function TestExplorer(props: TestExplorerProps) {
                 <input
                   ref={createRef}
                   className="flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-600"
-                  value={newFolderName}
-                  onChange={e => setNewFolderName(e.target.value)}
+                  defaultValue=""
                   placeholder="folder-name"
+                  onChange={e => { newFolderNameRef.current = e.target.value }}
                   onKeyDown={e => {
                     e.stopPropagation()
-                    if (e.key === 'Enter') doCreateFolder(node.path, newFolderName)
-                    if (e.key === 'Escape') { setCreating(null); setNewFolderName('') }
+                    if (e.key === 'Enter') doCreateFolder(node.path, newFolderNameRef.current)
+                    if (e.key === 'Escape') { setCreating(null); newFolderNameRef.current = '' }
                   }}
-                  autoFocus
                 />
                 <button
                   className="text-[10px] text-brand-400 hover:text-brand-300 font-medium"
-                  onMouseDown={e => { e.preventDefault(); doCreateFolder(node.path, newFolderName) }}
+                  onMouseDown={e => { e.preventDefault(); doCreateFolder(node.path, newFolderNameRef.current) }}
                 >Create</button>
                 <button
                   className="text-[10px] text-slate-500 hover:text-slate-300"
-                  onMouseDown={e => { e.preventDefault(); setCreating(null); setNewFolderName('') }}
+                  onMouseDown={e => { e.preventDefault(); setCreating(null); newFolderNameRef.current = '' }}
                 >✕</button>
               </div>
             )}
@@ -497,7 +573,7 @@ export default function TestExplorer(props: TestExplorerProps) {
             }} />
             <MenuItem icon={<FolderPlus size={12} />} label="New Subfolder" onClick={() => {
               setCreating({ parentPath: (target as { type: 'folder'; node: FolderNode }).node.path })
-              setNewFolderName('')
+              newFolderNameRef.current = ''
               setCtx(null)
             }} />
             <div className="border-t border-surface-500 my-1" />
@@ -578,14 +654,22 @@ export default function TestExplorer(props: TestExplorerProps) {
       {props.mode === 'builder' && (
         <>
           <button
-            onClick={() => { setCreating({ parentPath: testsRoot }); setNewFolderName('') }}
+            onClick={() => { setCreating({ parentPath: testsRoot }); newFolderNameRef.current = '' }}
             className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-brand-300 transition-colors"
-            title="New folder"
+            title="New folder at root"
           ><FolderPlus size={13} /></button>
           <button
-            onClick={() => (props as BuilderProps).onCreateTest(testsRoot)}
+            onClick={() => {
+              // Create in the folder of the currently active test, or root
+              const activeId = (props as BuilderProps).activeId
+              const activeTc = props.testCases.find(t => t.id === activeId)
+              const targetFolder = activeTc
+                ? activeTc.filePath.substring(0, activeTc.filePath.lastIndexOf('/'))
+                : testsRoot
+              ;(props as BuilderProps).onCreateTest(targetFolder)
+            }}
             className="p-1 rounded hover:bg-surface-600 text-slate-500 hover:text-brand-300 transition-colors"
-            title="New test case"
+            title="New test case (in active folder)"
           ><Plus size={13} /></button>
         </>
       )}

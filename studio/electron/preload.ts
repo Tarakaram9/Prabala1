@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('prabala', {
     openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
     saveFile: (filters: { name: string; extensions: string[] }[]) =>
       ipcRenderer.invoke('dialog:saveFile', filters),
+    openFile: (filters?: { name: string; extensions: string[] }[]) =>
+      ipcRenderer.invoke('dialog:openFile', filters),
   },
 
   // ── Test Runner ──────────────────────────────────────────────────────────────
@@ -125,14 +127,42 @@ contextBridge.exposeInMainWorld('prabala', {
       ipcRenderer.removeAllListeners('ai:chunk');
       ipcRenderer.removeAllListeners('ai:done');
     },
-  },});
+  },
+  // ── Desktop Recorder ─────────────────────────────────────────────────────────
+  desktopRecorder: {
+    start: (appPath: string, appiumUrl?: string) => ipcRenderer.invoke('desktopRecorder:start', appPath, appiumUrl),
+    stop: () => ipcRenderer.invoke('desktopRecorder:stop'),
+    onStep: (cb: (step: { keyword: string; params: Record<string, string> }) => void) => {
+      ipcRenderer.removeAllListeners('desktopRecorder:step');
+      ipcRenderer.on('desktopRecorder:step', (_e, step) => cb(step));
+    },
+    onDone: (cb: () => void) => {
+      ipcRenderer.removeAllListeners('desktopRecorder:done');
+      ipcRenderer.on('desktopRecorder:done', () => cb());
+    },
+    onError: (cb: (msg: string) => void) => {
+      ipcRenderer.removeAllListeners('desktopRecorder:error');
+      ipcRenderer.on('desktopRecorder:error', (_e, msg) => cb(String(msg)));
+    },
+    onScreenshot: (cb: (frame: { __screenshot: string; __screenshotType: string; width: number; height: number }) => void) => {
+      ipcRenderer.removeAllListeners('desktopRecorder:screenshot');
+      ipcRenderer.on('desktopRecorder:screenshot', (_e, frame) => cb(frame));
+    },
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('desktopRecorder:step');
+      ipcRenderer.removeAllListeners('desktopRecorder:done');
+      ipcRenderer.removeAllListeners('desktopRecorder:error');
+      ipcRenderer.removeAllListeners('desktopRecorder:screenshot');
+    },
+  },
+});
 
 // Type declaration for TypeScript in renderer
 declare global {
   interface Window {
     prabala: {
       fs: { readFile(p: string): Promise<string>; writeFile(p: string, c: string): Promise<void>; readDir(p: string): Promise<{name:string;isDir:boolean;path:string}[]>; exists(p: string): Promise<boolean>; deleteFile(p: string): Promise<void>; mkdir(p: string): Promise<void>; deleteDir(p: string): Promise<void>; rename(o: string, n: string): Promise<void>; moveFile(s: string, d: string): Promise<void> };
-      dialog: { openFolder(): Promise<string|undefined>; saveFile(f: {name:string;extensions:string[]}[]): Promise<string|undefined> };
+      dialog: { openFolder(): Promise<string|undefined>; saveFile(f: {name:string;extensions:string[]}[]): Promise<string|undefined>; openFile(f?: {name:string;extensions:string[]}[]): Promise<string|undefined> };
       runner: {
         run(pattern: string, projectDir: string, extraArgs?: string[]): Promise<void>;
         stop(): Promise<void>;
@@ -171,6 +201,15 @@ declare global {
         onLocator(cb: (result: { locator: string; tag: string; text: string }) => void): void;
         onError(cb: (message: string) => void): void;
         onDone(cb: () => void): void;
+        removeAllListeners(): void;
+      };
+      desktopRecorder: {
+        start(appPath: string, appiumUrl?: string): Promise<void>;
+        stop(): Promise<void>;
+        onStep(cb: (step: { keyword: string; params: Record<string, string> }) => void): void;
+        onDone(cb: () => void): void;
+        onError(cb: (msg: string) => void): void;
+        onScreenshot(cb: (frame: { __screenshot: string; __screenshotType: string; width: number; height: number }) => void): void;
         removeAllListeners(): void;
       };
     };

@@ -191,9 +191,23 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('fs:moveFile', (_e, srcPath: string, destPath: string) => {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    fs.renameSync(srcPath, destPath);
-    return true;
+    try {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      try {
+        fs.renameSync(srcPath, destPath);
+      } catch (err: any) {
+        if (err.code === 'EXDEV') {
+          // Cross-device move: fall back to copy + delete
+          fs.copyFileSync(srcPath, destPath);
+          fs.unlinkSync(srcPath);
+        } else {
+          throw err;
+        }
+      }
+      return true;
+    } catch (err: any) {
+      throw new Error(err.message ?? String(err));
+    }
   });
 
   // ── Dialogs ──────────────────────────────────────────────────────────────────
@@ -208,6 +222,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle('dialog:saveFile', async (_e, filters: Electron.FileFilter[]) => {
     const result = await dialog.showSaveDialog(mainWindow!, { filters });
     return result.filePath ?? null;
+  });
+
+  ipcMain.handle('dialog:openFile', async (_e, filters?: Electron.FileFilter[]) => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      // 'openDirectory' is required on macOS to select .app bundles.
+      // Without it the user navigates INTO the bundle instead of selecting it.
+      properties: ['openFile', 'openDirectory'],
+      title: 'Select Application to Record',
+      filters: filters ?? [
+        { name: 'Applications', extensions: ['app', 'exe', 'dmg'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    return result.filePaths[0] ?? null;
   });
 
   // ── Test Execution ───────────────────────────────────────────────────────────
@@ -473,6 +501,73 @@ window.__prabalaGetLocator = function(el) {
   ipcMain.handle('spy:stop', () => {
     killChild(spyProcess);
     spyProcess = null;
+    return true;
+  });
+
+  // ── Desktop Recorder ─────────────────────────────────────────────────────────
+  let desktopRecorderProcess: ReturnType<typeof spawn> | null = null;
+
+  ipcMain.handle('desktopRecorder:start', (_e, appPath: string, appiumUrl?: string) => {
+    try {
+      if (desktopRecorderProcess) { killChild(desktopRecorderProcess); desktopRecorderProcess = null; }
+
+      const electronDir = isDev
+        ? path.join(__dirname, '..', 'electron')
+        : __dirname;
+      const nodeModules = path.join(__dirname, '..', '..', 'node_modules');
+      const script = path.join(electronDir, 'desktop-recorder.cjs');
+
+      desktopRecorderProcess = spawn(NODE_BIN, [script, appPath || '', appiumUrl || 'http://localhost:4723'], {
+        cwd: path.dirname(script),
+        env: { ...process.env, NODE_PATH: nodeModules },
+      });
+
+      // Handle ENOENT / EACCES — e.g. node not found or script missing
+      desktopRecorderProcess.on('error', (err: NodeJS.ErrnoException) => {
+        console.error('[Desktop Recorder] spawn error:', err.message);
+        mainWindow?.webContents.send('desktopRecorder:error', `Failed to start recorder: ${err.message}`);
+        mainWindow?.webContents.send('desktopRecorder:done');
+        desktopRecorderProcess = null;
+      });
+
+      desktopRecorderProcess.stdout?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          try {
+            const obj = JSON.parse(line);
+            if (obj.__done) {
+              mainWindow?.webContents.send('desktopRecorder:done');
+            } else if (obj.__error) {
+              mainWindow?.webContents.send('desktopRecorder:error', obj.__error);
+            } else if (obj.__screenshot) {
+              mainWindow?.webContents.send('desktopRecorder:screenshot', obj);
+            } else {
+              mainWindow?.webContents.send('desktopRecorder:step', obj);
+            }
+          } catch { /* ignore malformed */ }
+        }
+      });
+
+      desktopRecorderProcess.stderr?.on('data', (data: Buffer) => {
+        console.log('[Desktop Recorder]', data.toString().trim());
+      });
+
+      desktopRecorderProcess.on('close', (code) => {
+        mainWindow?.webContents.send('desktopRecorder:done');
+        desktopRecorderProcess = null;
+      });
+
+      return true;
+    } catch (err: any) {
+      console.error('[Desktop Recorder] IPC handler error:', err);
+      mainWindow?.webContents.send('desktopRecorder:error', err?.message || 'Failed to start desktop recorder');
+      return false;
+    }
+  });
+
+  ipcMain.handle('desktopRecorder:stop', () => {
+    killChild(desktopRecorderProcess);
+    desktopRecorderProcess = null;
     return true;
   });
 

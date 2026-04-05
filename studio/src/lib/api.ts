@@ -158,6 +158,12 @@ const api = {
       // For web: ask user to type the save path
       return openFolderDialog()
     },
+    async openFile(filters?: { name: string; extensions: string[] }[]): Promise<string | undefined> {
+      const ipc = (window as any).prabala?.dialog
+      if (ipc) return ipc.openFile(filters) ?? undefined
+      // Web mode: no native file picker for arbitrary paths — not supported
+      return undefined
+    },
   },
 
   runner: {
@@ -228,6 +234,45 @@ const api = {
       const ipc = (window as any).prabala?.recorder
       if (ipc) { ipc.removeAllListeners(); return }
       wsOffAll(['recorder:step', 'recorder:done', 'recorder:error', 'recorder:screenshot'])
+    },
+  },
+
+  desktopRecorder: {
+    async start(appPath: string, appiumUrl = 'http://localhost:4723'): Promise<void> {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc) return ipc.start(appPath, appiumUrl)
+      getWs()
+      await post('/desktopRecorder/start', { appPath, appiumUrl })
+    },
+    async stop(): Promise<void> {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc) { await ipc.stop(); return }
+      await post('/desktopRecorder/stop', {})
+    },
+    onStep(cb: (step: { keyword: string; params: Record<string, string> }) => void): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc) { ipc.onStep(cb); return }
+      wsOn('desktopRecorder:step', (p) => cb(p as { keyword: string; params: Record<string, string> }))
+    },
+    onDone(cb: () => void): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc) { ipc.onDone(cb); return }
+      wsOn('desktopRecorder:done', () => cb())
+    },
+    onError(cb: (msg: string) => void): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc?.onError) { ipc.onError(cb); return }
+      wsOn('desktopRecorder:error', (p) => cb(String(p)))
+    },
+    onScreenshot(cb: (frame: { __screenshot: string; __screenshotType: string; width: number; height: number }) => void): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc?.onScreenshot) { ipc.onScreenshot(cb); return }
+      wsOn('desktopRecorder:screenshot', (p) => cb(p as { __screenshot: string; __screenshotType: string; width: number; height: number }))
+    },
+    removeAllListeners(): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc) { ipc.removeAllListeners(); return }
+      wsOffAll(['desktopRecorder:step', 'desktopRecorder:done', 'desktopRecorder:error', 'desktopRecorder:screenshot'])
     },
   },
 
@@ -363,5 +408,5 @@ const electronBridge = typeof window !== 'undefined' ? (window as Window & { pra
 // exists and the REST fallback fills in any gaps.
 // NOTE: api.recorder is preserved (not overwritten by electronBridge.recorder) because
 // it already delegates to IPC internally AND contains REST-only methods like onScreenshot.
-export default electronBridge ? { ...api, ...electronBridge, recorder: api.recorder } : api
+export default electronBridge ? { ...api, ...electronBridge, recorder: api.recorder, desktopRecorder: api.desktopRecorder } : api
 export type PrabalaApi = typeof api

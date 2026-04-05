@@ -41,7 +41,11 @@ window.__prabalaGetLocator = function(inputEl) {
   if (!el || el === document.body || el === document.documentElement) return null;
 
   function q(v) {
-    return String(v || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    // split/join avoids regex backslash-escaping issues inside template literals
+    var s = String(v || '');
+    s = s.split('\\\\').join('\\\\\\\\');
+    s = s.split('"').join('\\\\"');
+    return s;
   }
 
   function cssEsc(v) {
@@ -257,7 +261,7 @@ const SPY_UI = `
     __psCaptured = true;
     var loc = (window.__prabalaGetLocator && window.__prabalaGetLocator(el)) || el.tagName.toLowerCase();
     var tag = el.tagName.toLowerCase();
-    var txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    var txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
 
     // ── Send via fetch — intercepted by Playwright context.route ─────────────
     // Fixed fake hostname works on any page, including about:blank
@@ -348,6 +352,11 @@ async function run() {
   if (os.platform() === 'linux') {
     launchArgs.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
   }
+  // macOS: when Playwright Chromium is spawned from within Electron (itself a Chromium
+  // process), the nested sandbox layer can cause the child Chromium to crash.
+  if (os.platform() === 'darwin') {
+    launchArgs.push('--no-sandbox', '--disable-setuid-sandbox');
+  }
   const browser = await playwright.chromium.launch({
     headless: forceHeadless,
     args: launchArgs,
@@ -379,7 +388,11 @@ async function run() {
 
   // ── addInitScript: ONLY the locator strategy (pure JS, zero DOM access) ─────
   // SPY_UI is injected later via page.on('domcontentloaded') where body exists.
-  await context.addInitScript(LOCATOR_STRATEGY);
+  try {
+    await context.addInitScript(LOCATOR_STRATEGY);
+  } catch (e) {
+    process.stderr.write('[Spy] addInitScript error: ' + String(e) + '\n');
+  }
 
   const page = await context.newPage();
 

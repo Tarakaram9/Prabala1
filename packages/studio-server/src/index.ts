@@ -916,6 +916,67 @@ app.post('/api/spy/stop', (_req: Request, res: Response) => {
   res.json({ ok: true })
 })
 
+// ── /api/desktopRecorder ──────────────────────────────────────────────────────
+let desktopRecorderProcess: ChildProcess | null = null
+
+app.post('/api/desktopRecorder/start', (req: Request, res: Response) => {
+  try {
+    const { appPath, appiumUrl } = req.body as { appPath?: string; appiumUrl?: string }
+    if (desktopRecorderProcess) { killChild(desktopRecorderProcess); desktopRecorderProcess = null }
+
+    const recorderScript = path.resolve(__dirname, '../../../studio/electron/desktop-recorder.cjs')
+    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+
+    desktopRecorderProcess = spawn('node', [recorderScript, appPath || '', appiumUrl || 'http://localhost:4723'], {
+      cwd: path.dirname(recorderScript),
+      env: { ...process.env, NODE_PATH: monoRepoNodeModules },
+    })
+
+    desktopRecorderProcess.on('error', (err: NodeJS.ErrnoException) => {
+      broadcast('desktopRecorder:error', `Failed to start recorder: ${err.message}`)
+      broadcast('desktopRecorder:done', null)
+      desktopRecorderProcess = null
+    })
+
+    desktopRecorderProcess.stdout?.on('data', (d: Buffer) => {
+      const lines = d.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line)
+          if (obj.__done) {
+            broadcast('desktopRecorder:done', null)
+          } else if (obj.__error) {
+            broadcast('desktopRecorder:error', obj.__error)
+          } else if (obj.__screenshot) {
+            broadcast('desktopRecorder:screenshot', obj)
+          } else {
+            broadcast('desktopRecorder:step', obj)
+          }
+        } catch { /* ignore malformed */ }
+      }
+    })
+
+    desktopRecorderProcess.stderr?.on('data', (d: Buffer) => {
+      console.log('[Desktop Recorder]', d.toString().trim())
+    })
+
+    desktopRecorderProcess.on('close', () => {
+      broadcast('desktopRecorder:done', null)
+      desktopRecorderProcess = null
+    })
+
+    res.json({ ok: true })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/desktopRecorder/stop', (_req: Request, res: Response) => {
+  if (desktopRecorderProcess) { killChild(desktopRecorderProcess); desktopRecorderProcess = null }
+  broadcast('desktopRecorder:done', null)
+  res.json({ ok: true })
+})
+
 // ── /api/ai ───────────────────────────────────────────────────────────────────
 
 const AI_CONFIG_FILE = path.join(os.homedir(), '.prabala', 'ai.json')

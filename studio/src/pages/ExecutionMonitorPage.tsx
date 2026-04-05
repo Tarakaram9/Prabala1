@@ -58,6 +58,18 @@ export default function ExecutionMonitorPage() {
     })
   }
 
+  function toggleFolder(filePaths: string[], forceOn: boolean) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (forceOn) {
+        filePaths.forEach(fp => next.add(fp))
+      } else {
+        filePaths.forEach(fp => next.delete(fp))
+      }
+      return next
+    })
+  }
+
   // ── Rescan project for test files ──────────────────────────────────────────
   async function rescan() {
     if (!projectDir) return
@@ -150,6 +162,7 @@ export default function ExecutionMonitorPage() {
           rescanning={rescanning}
           selected={selected}
           onToggleTest={toggleOne}
+          onToggleFolderTests={toggleFolder}
           allSelected={allSelected}
           someSelected={someSelected}
           onToggleAll={toggleAll}

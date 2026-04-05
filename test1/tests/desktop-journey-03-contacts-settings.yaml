@@ -1,0 +1,231 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Journey 03 – Contacts & Settings
+#
+# Covers:
+#   • Navigating to the Contacts section
+#   • Adding a new contact with all fields
+#   • Deleting a contact
+#   • Navigating to Settings
+#   • Toggling notifications and dark mode
+#   • Updating the display name and saving
+#   • Window management (Maximize / Minimize / Restore)
+#
+# Pre-requisites: same as Journey 01 — app built, Appium running
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Desktop - Contacts and Settings Journey
+description: Add/delete contacts, change settings, test window controls
+
+variables:
+  APP_PATH: ../desktop-demo-app/dist/mac/PrabalaTaskManager.app
+
+steps:
+
+  # ── Launch and login ───────────────────────────────────────────────────────
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: ${APP_PATH}
+    description: Launch the demo app
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Login Screen
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      text: admin
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      text: admin123
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Main Application
+
+  # ── Navigate to Contacts ───────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Contacts Tab
+    description: Click Contacts in the sidebar
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Contacts View
+    description: Contacts view should be active
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Contacts Heading
+    description: Contacts heading should be visible
+
+  # ── Add a new contact ──────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Add Contact
+    description: Open the Add Contact form
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Contact Form
+    description: Contact form panel should appear
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Contact Name
+      text: Carol Williams
+    description: Enter contact full name
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Contact Email
+      text: carol@example.com
+    description: Enter email address
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Contact Phone
+      text: +1 555-0303
+    description: Enter phone number
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Contact Department
+    description: Open department dropdown
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Engineering
+    description: Select Engineering department
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Contact
+    description: Save the new contact
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Contact: Carol Williams
+    description: New contact card should appear in the grid
+
+  - keyword: Desktop.AssertContainsText
+    params:
+      locator: name=Contact Count
+      expected: contacts
+    description: Contact count should have increased
+
+  # ── Delete a contact ───────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Delete Contact Carol Williams
+    description: Click delete on Carol Williams's card
+
+  - keyword: Desktop.AssertNotVisible
+    params:
+      locator: name=Contact: Carol Williams
+    description: Deleted contact should no longer appear
+
+  # ── Navigate to Settings ───────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Settings Tab
+    description: Click Settings in the sidebar
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Settings View
+    description: Settings view should be active
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Profile Section
+    description: Profile settings section should be visible
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Notifications Section
+    description: Notifications section should be visible
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Appearance Section
+    description: Appearance section should be visible
+
+  # ── Toggle settings ────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Email Reminders
+    description: Toggle Email Reminders on
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Dark Mode
+    description: Toggle Dark Mode on
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Dark Mode
+    description: Toggle Dark Mode back off
+
+  # ── Update display name ────────────────────────────────────────────────────
+  - keyword: Desktop.ClearText
+    params:
+      locator: name=Display Name
+    description: Clear current display name
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Display Name
+      text: Administrator
+    description: Enter new display name
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Settings
+    description: Save settings
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Settings Saved Message
+    description: Settings saved confirmation should appear
+
+  - keyword: Desktop.AssertContainsText
+    params:
+      locator: name=Settings Saved Message
+      expected: saved
+    description: Verify saved confirmation text
+
+  # ── Verify display name updated in sidebar ─────────────────────────────────
+  - keyword: Desktop.AssertText
+    params:
+      locator: name=Current User
+      expected: Administrator
+    description: Sidebar should now show the updated display name
+
+  # ── Window management ──────────────────────────────────────────────────────
+  - keyword: Desktop.Maximize
+    description: Maximise the application window
+
+  - keyword: Desktop.TakeScreenshot
+    params:
+      filePath: screenshots/desktop-maximized.png
+    description: Capture screenshot in maximised state
+
+  - keyword: Desktop.Minimize
+    description: Minimise the application window
+
+  - keyword: Desktop.SetWindowSize
+    params:
+      width: 1024
+      height: 720
+    description: Restore window to normal size
+
+  # ── Teardown ───────────────────────────────────────────────────────────────
+  - keyword: Desktop.CloseApp
+    description: Close the application

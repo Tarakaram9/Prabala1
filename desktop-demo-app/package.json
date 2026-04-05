@@ -1,0 +1,29 @@
+{
+  "name": "prabala-task-manager-demo",
+  "version": "1.0.0",
+  "description": "Sample desktop app for testing Prabala Desktop keyword automation",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:dir": "electron-builder --mac dir",
+    "build:dmg": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "io.prabala.demo.taskmanager",
+    "productName": "PrabalaTaskManager",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dir", "arch": ["arm64", "x64"] }]
+    },
+    "win": {
+      "target": "dir"
+    }
+  }
+}

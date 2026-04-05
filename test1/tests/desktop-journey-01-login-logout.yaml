@@ -1,0 +1,143 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Journey 01 – Login & Logout
+#
+# Covers:
+#   • Attempting login with wrong password (error message shown)
+#   • Logging in successfully with admin credentials
+#   • Verifying the dashboard is visible
+#   • Logging out and landing back on the login screen
+#
+# Pre-requisites:
+#   1. Build the demo app:
+#        cd desktop-demo-app && npm install && npm run build:dir
+#   2. Start Appium in another terminal:
+#        appium
+#   3. Update APP_PATH below (or pass via --var APP_PATH=<path>)
+#      macOS arm64: ../desktop-demo-app/dist/mac-arm64/PrabalaTaskManager.app
+#      macOS x64:   ../desktop-demo-app/dist/mac/PrabalaTaskManager.app
+#
+# Locator strategy:
+#   All elements use  name=<aria-label>  which maps to the macOS
+#   accessibility "label" attribute exposed by Electron/WebKit.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Desktop - Login and Logout Journey
+description: Verify login validation, successful login, and logout flow
+
+variables:
+  APP_PATH: ../desktop-demo-app/dist/mac/PrabalaTaskManager.app
+
+steps:
+
+  # ── Launch the application ─────────────────────────────────────────────────
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: ${APP_PATH}
+    description: Launch Prabala Task Manager demo app
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Login Screen
+    description: Wait for login screen to appear
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Login
+    description: Verify Login button is present
+
+  # ── Invalid login attempt ──────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Username
+    description: Focus the username field
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      text: admin
+    description: Type username
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      text: wrongpassword
+    description: Type an incorrect password
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+    description: Click the Sign In button
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Login Error Message
+    description: Wait for error banner to appear
+
+  - keyword: Desktop.AssertContainsText
+    params:
+      locator: name=Login Error Message
+      expected: Invalid username or password
+    description: Verify error message is shown for bad credentials
+
+  # ── Correct login ──────────────────────────────────────────────────────────
+  - keyword: Desktop.ClearText
+    params:
+      locator: name=Password
+    description: Clear the password field
+
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      text: admin123
+    description: Enter correct password
+
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+    description: Click Sign In with correct credentials
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Main Application
+    description: Wait for the main dashboard to load
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Tasks Tab
+    description: Verify Tasks tab is visible in the sidebar
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Contacts Tab
+    description: Verify Contacts tab is visible
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Settings Tab
+    description: Verify Settings tab is visible
+
+  - keyword: Desktop.AssertText
+    params:
+      locator: name=Current User
+      expected: Admin
+    description: Confirm logged-in user name shown in sidebar
+
+  # ── Logout ─────────────────────────────────────────────────────────────────
+  - keyword: Desktop.Click
+    params:
+      locator: name=Logout
+    description: Click the Logout button
+
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Login Screen
+    description: Wait for login screen to reappear after logout
+
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Login
+    description: Confirm we are back on the login screen
+
+  # ── Teardown ───────────────────────────────────────────────────────────────
+  - keyword: Desktop.CloseApp
+    description: Close the application

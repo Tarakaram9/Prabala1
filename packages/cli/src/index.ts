@@ -16,10 +16,12 @@ import * as yaml from 'js-yaml';
 import { glob } from 'glob';
 import { Orchestrator, KeywordRegistry, PrabalaConfig, TestParser, SuiteResult } from '@prabala/core';
 import { registerWebKeywords } from '@prabala/driver-web';
+import { registerApiKeywords } from '@prabala/driver-api';
 import { HtmlReporter, JUnitReporter } from '@prabala/reporting';
 
 // Register all built-in keyword libraries
 registerWebKeywords();
+registerApiKeywords();
 
 // SAP GUI keywords — only register on Windows, skip gracefully elsewhere
 if (process.platform === 'win32') {
@@ -30,6 +32,15 @@ if (process.platform === 'win32') {
   } catch {
     // driver-sap not built yet or winax missing — no-op
   }
+}
+
+// Desktop keywords — register with graceful fallback if native deps unavailable
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { registerDesktopKeywords } = require('@prabala/driver-desktop');
+  registerDesktopKeywords();
+} catch {
+  // driver-desktop not available in this environment — no-op
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
