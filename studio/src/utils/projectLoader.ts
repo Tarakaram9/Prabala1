@@ -50,7 +50,7 @@ export async function loadProjectData(projectDir: string): Promise<void> {
   }
 }
 
-async function loadTestCases(projectDir: string): Promise<TestCase[]> {
+async function loadTestCases(projectDir: string): Promise<{ cases: TestCase[]; folders: string[] }> {
   const testsDir = `${projectDir}/tests`
   const cases: TestCase[] = []
   const folders: string[] = []

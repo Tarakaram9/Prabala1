@@ -1,0 +1,142 @@
+testCase: HITL Page review
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: WaitForVisible
+    params:
+      locator: '#username'
+  - keyword: EnterText
+    params:
+      locator: '#username'
+      value: test3
+  - keyword: EnterText
+    params:
+      locator: '#password'
+      value: Welcome987*
+  - keyword: Click
+    params:
+      locator: text=Login
+  - keyword: WaitForVisible
+    params:
+      locator: text=🧪 Test Vault Access and manage your test artefact
+  - keyword: Click
+    params:
+      locator: text=🧪 Test Vault Access and manage your test artefact
+  - keyword: WaitForVisible
+    params:
+      locator: a.nav-link:has-text("👥 HITL Suite")
+  - keyword: Click
+    params:
+      locator: a.nav-link:has-text("👥 HITL Suite")
+  - keyword: WaitForVisible
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: Click
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: WaitForVisible
+    params:
+      locator: '#feedbackText'
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Appr
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Approved
+  - keyword: Click
+    params:
+      locator: '#submitFeedbackBtn'
+  - keyword: WaitForVisible
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: Click
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: WaitForVisible
+    params:
+      locator: '#feedbackText'
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Approved
+  - keyword: Click
+    params:
+      locator: '#submitFeedbackBtn'
+  - keyword: WaitForVisible
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: Click
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: WaitForVisible
+    params:
+      locator: '#feedbackText'
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Approve
+  - keyword: Click
+    params:
+      locator: '#submitFeedbackBtn'
+  - keyword: WaitForVisible
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: Click
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'approve')])[1]
+  - keyword: WaitForVisible
+    params:
+      locator: '#feedbackText'
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Approve
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Approved
+  - keyword: Click
+    params:
+      locator: '#submitFeedbackBtn'
+  - keyword: WaitForVisible
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'reject')])[1]
+  - keyword: Click
+    params:
+      locator: (//button[contains(@class,'tbl-btn') and contains(@class,'reject')])[1]
+  - keyword: WaitForVisible
+    params:
+      locator: '#feedbackText'
+  - keyword: EnterText
+    params:
+      locator: '#feedbackText'
+      value: Reject
+  - keyword: Click
+    params:
+      locator: '#submitFeedbackBtn'
+  - keyword: WaitForVisible
+    params:
+      locator: '#trainButton'
+  - keyword: Click
+    params:
+      locator: '#trainButton'
+  - keyword: WaitForVisible
+    params:
+      locator: text=🏠 Dashboard
+  - keyword: Click
+    params:
+      locator: text=🏠 Dashboard
+  - keyword: WaitForVisible
+    params:
+      locator: text=🚪 Sign Out
+  - keyword: Click
+    params:
+      locator: text=🚪 Sign Out
+  - keyword: WaitForVisible
+    params:
+      locator: '#username'
+  - keyword: Web.Close

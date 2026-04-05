@@ -1,0 +1,46 @@
+testCase: Autonova
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: EnterText
+    params:
+      locator: '#username'
+      value: test3
+  - keyword: EnterText
+    params:
+      locator: '#password'
+      value: Welcome987*
+  - keyword: PressKey
+    params:
+      key: Enter
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/dashboard
+  - keyword: Click
+    params:
+      locator: text=⚡ AutoNova Migrate automation scripts between tool
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/autonova
+  - keyword: SelectOption
+    params:
+      locator: '#source_tool'
+      option: selenium
+  - keyword: SelectOption
+    params:
+      locator: '#source_language'
+      option: java
+  - keyword: Click
+    params:
+      locator: text=🚪 Sign Out
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Web.Close
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Web.Close

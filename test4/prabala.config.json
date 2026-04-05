@@ -2,5 +2,7 @@
   "name": "Test4",
   "version": "0.1",
   "browser": "chromium",
-  "outputDir": "/Users/ram/prabala/test4/artifacts"
+  "outputDir": "/Users/ram/prabala/test4/artifacts",
+  "timeout": 60000,
+  "headless": true
 }

@@ -1,0 +1,30 @@
+testCase: "API Simple – GET a public post and assert response"
+tags:
+  - api
+  - simple
+description: >
+  Validates a basic GET request against the JSONPlaceholder public REST API.
+  Asserts HTTP 200, response body id, userId, and that the title field exists.
+steps:
+  - keyword: API.GET
+    params:
+      url: "https://jsonplaceholder.typicode.com/posts/1"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "200"
+
+  - keyword: API.AssertBody
+    params:
+      path: "id"
+      expected: "1"
+
+  - keyword: API.AssertBody
+    params:
+      path: "userId"
+      expected: "1"
+
+  - keyword: API.AssertBody
+    params:
+      path: "title"
+      expected: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"

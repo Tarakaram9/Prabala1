@@ -60,14 +60,23 @@ contextBridge.exposeInMainWorld('prabala', {
       ipcRenderer.invoke('recorder:start', startUrl, projectDir),
     stop: () => ipcRenderer.invoke('recorder:stop'),
     onStep: (cb: (step: { keyword: string; params: Record<string, string> }) => void) => {
+      // Remove any previous listener before adding a new one to prevent accumulation
+      ipcRenderer.removeAllListeners('recorder:step');
       ipcRenderer.on('recorder:step', (_e, step) => cb(step));
     },
     onDone: (cb: () => void) => {
-      ipcRenderer.once('recorder:done', () => cb());
+      // Use 'on' not 'once' — removeAllListeners() handles cleanup between sessions
+      ipcRenderer.removeAllListeners('recorder:done');
+      ipcRenderer.on('recorder:done', () => cb());
+    },
+    onError: (cb: (msg: string) => void) => {
+      ipcRenderer.removeAllListeners('recorder:error');
+      ipcRenderer.on('recorder:error', (_e, msg) => cb(String(msg)));
     },
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('recorder:step');
       ipcRenderer.removeAllListeners('recorder:done');
+      ipcRenderer.removeAllListeners('recorder:error');
     },
   },
   // ── Element Spy ──────────────────────────────────────────────────────────────

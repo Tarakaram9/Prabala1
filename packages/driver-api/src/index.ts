@@ -12,10 +12,11 @@ export const apiKeywords: KeywordDefinition[] = [
     params: ['url', 'responseAs'],
     execute: async (params, context: ExecutionContext) => {
       const response = await axios.get(String(params.url));
+      context.variables['__lastStatus__'] = response.status;
+      context.variables['__lastResponse__'] = response.data as unknown;
       if (params.responseAs) {
         context.variables[String(params.responseAs)] = response.data as unknown;
       }
-      context.variables['__lastStatus__'] = response.status;
     },
   },
   {
@@ -26,10 +27,11 @@ export const apiKeywords: KeywordDefinition[] = [
       const body =
         typeof params.body === 'string' ? JSON.parse(params.body) : params.body;
       const response = await axios.post(String(params.url), body);
+      context.variables['__lastStatus__'] = response.status;
+      context.variables['__lastResponse__'] = response.data as unknown;
       if (params.responseAs) {
         context.variables[String(params.responseAs)] = response.data as unknown;
       }
-      context.variables['__lastStatus__'] = response.status;
     },
   },
   {

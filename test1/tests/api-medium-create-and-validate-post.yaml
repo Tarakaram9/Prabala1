@@ -1,0 +1,56 @@
+testCase: "API Medium – Create a post and validate the created resource"
+tags:
+  - api
+  - medium
+description: >
+  Sends a POST request to create a new blog post, then asserts the
+  HTTP 201 Created status and validates each returned field matches the
+  submitted payload. Also reads an existing user to validate the GET → POST
+  workflow in a realistic sequence.
+steps:
+  # ── Step 1: Verify the user we will post on behalf of ──────────────────────
+  - keyword: API.GET
+    params:
+      url: "https://jsonplaceholder.typicode.com/users/1"
+      responseAs: "user"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "200"
+
+  - keyword: API.AssertBody
+    params:
+      path: "username"
+      expected: "Bret"
+
+  # ── Step 2: Create a new post for that user ─────────────────────────────────
+  - keyword: API.POST
+    params:
+      url: "https://jsonplaceholder.typicode.com/posts"
+      body: '{"userId": 1, "title": "Prabala API Test", "body": "Automated test post created by Prabala"}'
+      responseAs: "createdPost"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "201"
+
+  - keyword: API.AssertBody
+    params:
+      path: "userId"
+      expected: "1"
+
+  - keyword: API.AssertBody
+    params:
+      path: "title"
+      expected: "Prabala API Test"
+
+  - keyword: API.AssertBody
+    params:
+      path: "body"
+      expected: "Automated test post created by Prabala"
+
+  # JSONPlaceholder always returns id 101 for new posts (fake DB)
+  - keyword: API.AssertBody
+    params:
+      path: "id"
+      expected: "101"

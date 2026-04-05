@@ -26,6 +26,30 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const RENDERER_URL = 'http://localhost:5173';
 const isWin = os.platform() === 'win32';
 
+/**
+ * Resolve the absolute path to the system `node` binary.
+ * On macOS, Electron's spawned subprocesses may not inherit the full shell PATH
+ * (especially when launched via Finder or Spotlight), so we probe common locations.
+ */
+function findNodeBinary(): string {
+  if (isWin) {
+    // On Windows, rely on PATH — node is usually in %AppData%\npm or C:\Program Files\nodejs
+    return 'node';
+  }
+  const candidates = [
+    process.env.NODE_BINARY,       // explicit override via env
+    '/usr/local/bin/node',          // Homebrew on Intel macOS
+    '/opt/homebrew/bin/node',       // Homebrew on Apple Silicon macOS
+    '/usr/bin/node',                // system node (Linux / some macOS)
+    '/usr/local/nvm/versions/node/current/bin/node',
+  ];
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return 'node'; // last resort: rely on PATH
+}
+const NODE_BIN = findNodeBinary();
+
 /** Cross-platform graceful kill: IPC message on Windows, SIGTERM on Unix */
 function killChild(child: ReturnType<typeof spawn> | null): void {
   if (!child) return;
@@ -75,8 +99,16 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // Set Content-Security-Policy on all responses to suppress the Electron security warning
+  // Set Content-Security-Policy ONLY on localhost responses (Vite dev server + studio server).
+  // External websites loaded in the recording window must NOT have their CSP overridden —
+  // doing so blocks their own scripts and makes the page non-functional during recording.
   session.defaultSession.webRequest.onHeadersReceived((details: Electron.OnHeadersReceivedListenerDetails, callback: (response: Electron.HeadersReceivedResponse) => void) => {
+    const isLocalhost = /^https?:\/\/localhost(:\d+)?/.test(details.url)
+      || /^wss?:\/\/localhost(:\d+)?/.test(details.url);
+    if (!isLocalhost) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -134,7 +166,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('fs:deleteFile', (_e, filePath: string) => {
-    fs.unlinkSync(filePath);
+    try {
+      fs.unlinkSync(filePath);
+    } catch (err: any) {
+      // ENOENT means the file is already gone — treat as success (idempotent delete)
+      if (err.code !== 'ENOENT') throw err;
+    }
     return true;
   });
 
@@ -183,7 +220,7 @@ function registerIpcHandlers(): void {
     const configArgs = fs.existsSync(configPath) ? ['--config', configPath] : [];
 
     runningProcess = spawn(
-      'node',
+      NODE_BIN,
       [cliPath, 'run', pattern, ...configArgs, ...extraArgs],
       { cwd: projectDir, env: { ...process.env } }
     );
@@ -211,62 +248,159 @@ function registerIpcHandlers(): void {
   });
 
   // ── Browser Recorder ─────────────────────────────────────────────────────────
-  let recorderProcess: ReturnType<typeof spawn> | null = null;
+  // Uses a native Electron BrowserWindow so the recording browser is always
+  // visible and focused — no separate Playwright subprocess needed.
 
-  ipcMain.handle('recorder:start', (_e, startUrl: string, projectDir: string) => {
-    if (recorderProcess) {
-      killChild(recorderProcess);
-      recorderProcess = null;
+  let recorderWindow: BrowserWindow | null = null;
+
+  // LOCATOR + INTERCEPT scripts (inlined from recorder.cjs) injected into every page
+  const RECORDER_LOCATOR_SCRIPT = `
+window.__prabalaGetLocator = function(el) {
+  if (!el) return 'unknown';
+  if (el.id && !el.id.match(/^\\d/)) return '#' + el.id;
+  const testid = el.getAttribute('data-testid') || el.getAttribute('data-cy');
+  if (testid) return '[data-testid="' + testid + '"]';
+  const aria = el.getAttribute('aria-label');
+  if (aria) return '[aria-label="' + aria + '"]';
+  const ph = el.getAttribute('placeholder');
+  if (ph) return '[placeholder="' + ph + '"]';
+  const tag = el.tagName.toLowerCase();
+  if (!['input','textarea','select'].includes(tag)) {
+    const txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0, 50);
+    if (txt) return 'text=' + txt;
+  }
+  const cls = [...el.classList].filter(c => !/\\d{3,}/.test(c)).slice(0, 2).join('.');
+  return tag + (cls ? '.' + cls : '');
+};`;
+
+  const RECORDER_INTERCEPT_SCRIPT = `
+(function() {
+  if (window.__prabalaRecorderActive) return;
+  window.__prabalaRecorderActive = true;
+  let inputTimer = null;
+  let lastInputEl = null;
+  let lastInputVal = '';
+  document.addEventListener('click', function(e) {
+    const el = e.target;
+    if (['INPUT','TEXTAREA','SELECT'].includes(el.tagName)) return;
+    if (el.tagName === 'OPTION') return;
+    const loc = window.__prabalaGetLocator(el);
+    window.__prabalaSendStep('click', loc, '');
+  }, true);
+  document.addEventListener('input', function(e) {
+    const el = e.target;
+    if (!['INPUT','TEXTAREA'].includes(el.tagName)) return;
+    lastInputEl = el;
+    lastInputVal = el.value;
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(function() {
+      if (!lastInputEl) return;
+      const loc = window.__prabalaGetLocator(lastInputEl);
+      window.__prabalaSendStep('input', loc, lastInputVal);
+    }, 600);
+  }, true);
+  document.addEventListener('change', function(e) {
+    const el = e.target;
+    if (el.tagName !== 'SELECT') return;
+    const loc = window.__prabalaGetLocator(el);
+    window.__prabalaSendStep('select', loc, el.value);
+  }, true);
+  document.addEventListener('keydown', function(e) {
+    if (['Enter','Escape','Tab'].includes(e.key)) {
+      if (lastInputEl && inputTimer) {
+        clearTimeout(inputTimer);
+        const loc = window.__prabalaGetLocator(lastInputEl);
+        window.__prabalaSendStep('input', loc, lastInputVal);
+        lastInputEl = null;
+      }
+      if (e.key === 'Enter') window.__prabalaSendStep('key', 'Enter', '');
+    }
+  }, true);
+})();`;
+
+  // Forward raw steps from the recording window → recorder:step on mainWindow
+  ipcMain.on('recorder:raw-step', (_e, { type, locator, value }: { type: string; locator: string; value: string }) => {
+    let step: { keyword: string; params: Record<string, string> } | null = null;
+    switch (type) {
+      case 'click':   step = { keyword: 'Click',        params: { locator } }; break;
+      case 'input':   if (value) step = { keyword: 'EnterText', params: { locator, value } }; break;
+      case 'select':  step = { keyword: 'SelectOption', params: { locator, option: value } }; break;
+      case 'key':     step = { keyword: 'PressKey',     params: { key: locator } }; break;
+    }
+    if (step) mainWindow?.webContents.send('recorder:step', step);
+  });
+
+  const recorderPreload = isDev
+    ? path.join(__dirname, '..', 'electron', 'recorder-window-preload.cjs')
+    : path.join(__dirname, 'recorder-window-preload.cjs');
+
+  ipcMain.handle('recorder:start', async (_e, startUrl: string) => {
+    console.log('[Recorder] recorder:start IPC called, url:', startUrl)
+    // Close any existing recording window
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      recorderWindow.close();
+      recorderWindow = null;
     }
 
-    // In dev: __dirname = dist-electron/, script is at ../electron/recorder.cjs
-    // In prod: __dirname = dist-electron/, script is copied alongside as recorder.cjs
-    const recorderScript = isDev
-      ? path.join(__dirname, '..', 'electron', 'recorder.cjs')
-      : path.join(__dirname, 'recorder.cjs');
-
-    // Must use system 'node', NOT process.execPath (which is the Electron binary)
-    // NODE_PATH ensures playwright resolves from the monorepo node_modules
-    recorderProcess = spawn('node', [recorderScript, startUrl || ''], {
-      cwd: projectDir,
-      stdio: isWin ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        NODE_PATH: path.join(projectDir, 'node_modules'),
+    recorderWindow = new BrowserWindow({
+      width: 1280,
+      height: 820,
+      title: '● Recording — Prabala',
+      webPreferences: {
+        preload: recorderPreload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        // Allow mixed content and insecure pages to support any target site
+        webSecurity: false,
       },
     });
 
-    recorderProcess.stdout?.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n').filter(Boolean);
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj.__done) {
-            mainWindow?.webContents.send('recorder:done');
-          } else {
-            mainWindow?.webContents.send('recorder:step', obj);
-          }
-        } catch { /* ignore malformed lines */ }
+    // Inject locator + intercept scripts into every page/frame load
+    recorderWindow.webContents.on('did-finish-load', () => {
+      recorderWindow?.webContents.executeJavaScript(
+        RECORDER_LOCATOR_SCRIPT + '\n' + RECORDER_INTERCEPT_SCRIPT
+      ).catch(() => {});
+    });
+
+    // Emit NavigateTo when the URL changes
+    let lastNavUrl = '';
+    recorderWindow.webContents.on('did-navigate', (_e, url) => {
+      if (url.startsWith('http') && url !== lastNavUrl) {
+        lastNavUrl = url;
+        mainWindow?.webContents.send('recorder:step', { keyword: 'NavigateTo', params: { url } });
+      }
+    });
+    recorderWindow.webContents.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (isMainFrame && url.startsWith('http') && url !== lastNavUrl) {
+        lastNavUrl = url;
+        mainWindow?.webContents.send('recorder:step', { keyword: 'NavigateTo', params: { url } });
       }
     });
 
-    recorderProcess.stderr?.on('data', (data: Buffer) => {
-      const msg = data.toString().trim();
-      console.error('[Recorder stderr]', msg);
-      if (msg) mainWindow?.webContents.send('recorder:error', msg);
+    // Signal done when the recording window is closed
+    recorderWindow.on('closed', () => {
+      recorderWindow = null;
+      ipcMain.removeAllListeners('recorder:raw-step');
+      mainWindow?.webContents.send('recorder:done');
     });
 
-    recorderProcess.on('close', () => {
-      mainWindow?.webContents.send('recorder:done');
-      recorderProcess = null;
-    });
+    // Load the target URL (or a blank page if none given)
+    const target = startUrl && startUrl !== 'about:blank' ? startUrl : 'about:blank';
+    try {
+      await recorderWindow.loadURL(target);
+    } catch (err: any) {
+      // Non-fatal — navigation errors appear in the window itself
+      console.warn('[Recorder] loadURL warning:', err.message);
+    }
 
     return true;
   });
 
   ipcMain.handle('recorder:stop', () => {
-    killChild(recorderProcess);
-    recorderProcess = null;
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      recorderWindow.close();
+    }
+    recorderWindow = null;
     return true;
   });
 
@@ -295,7 +429,7 @@ function registerIpcHandlers(): void {
       spyArgs   = [url || 'about:blank'];
     }
 
-    spyProcess = spawn('node', [spyScript, ...spyArgs], {
+    spyProcess = spawn(NODE_BIN, [spyScript, ...spyArgs], {
       cwd: path.dirname(spyScript),
       env: {
         ...process.env,

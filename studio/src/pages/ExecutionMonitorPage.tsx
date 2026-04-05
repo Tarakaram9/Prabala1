@@ -97,25 +97,6 @@ export default function ExecutionMonitorPage() {
       ...(headless ? ['--headless'] : []),
     ]
 
-    if (!ipc) {
-      // Demo mode
-      const runCases = testCases.filter(tc => selected.has(tc.filePath))
-      appendLog({ ts: Date.now(), type: 'system', text: `🔮 Prabala v0.1.0 — Demo Mode\n▶ Pattern : ${pattern}\n▶ Browser : ${browser}${headless ? ' (headless)' : ''}\n\n` })
-      for (const tc of runCases) {
-        appendLog({ ts: Date.now(), type: 'stdout', text: `  ▶ ${tc.testCase}\n` })
-        await new Promise(r => setTimeout(r, 300))
-        for (const step of tc.steps.slice(0, 3)) {
-          appendLog({ ts: Date.now(), type: 'stdout', text: `    ✔ ${step.keyword} (${Math.floor(Math.random() * 800 + 50)}ms)\n` })
-          await new Promise(r => setTimeout(r, 150))
-        }
-        appendLog({ ts: Date.now(), type: 'stdout', text: `  ✔ ${tc.testCase}\n\n` })
-      }
-      appendLog({ ts: Date.now(), type: 'stdout', text: `──────────────────────────────────────────\n  Passed  : ${runCases.length}\n  Failed  : 0\n  Status   : PASS\n──────────────────────────────────────────\n` })
-      setRunStatus('passed')
-      setExitCode(0)
-      return
-    }
-
     appendLog({ ts: Date.now(), type: 'system', text: `▶ Pattern : ${pattern}\n▶ Browser : ${browser}${headless ? ' (headless)' : ''}\n\n` })
 
     ipc.runner.removeAllListeners()

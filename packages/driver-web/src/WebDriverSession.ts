@@ -2,6 +2,7 @@
 // Prabala Web Driver – Playwright Session Manager
 // ─────────────────────────────────────────────────────────────────────────────
 
+import * as os from 'os';
 import { Browser, BrowserContext, Page, chromium, firefox, webkit } from 'playwright';
 import { PrabalaConfig } from '@prabala/core';
 
@@ -14,9 +15,15 @@ export class WebDriverSession {
     const browserType = config.browser ?? 'chromium';
     const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
 
+    const isLinux = os.platform() === 'linux';
+    const extraArgs = isLinux
+      ? ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+      : [];
+
     this.browser = await launcher.launch({
       headless: config.headless ?? true,
       slowMo: 0,
+      args: extraArgs,
     });
 
     this.context = await this.browser.newContext({

@@ -332,6 +332,9 @@ export default function TestBuilderPage() {
       setIsRecording(false)
       setRecorderScreenshot(null)
       api.recorder.removeAllListeners()
+      // Re-open the recorder bar so the user can see any error and retry
+      if (!useAppStore.getState().activeTestCase) return
+      setRecorderBarOpen(true)
     })
     api.recorder.onError((msg: string) => {
       setRecorderError(msg)
@@ -1068,8 +1071,15 @@ steps:
                   >
                     <Wifi size={12} /> Start Recording
                   </button>
-                  <button onClick={() => setRecorderBarOpen(false)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
+                  <button onClick={() => { setRecorderBarOpen(false); setRecorderError(null) }} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
                 </div>
+                {recorderError && (
+                  <div className="flex items-center gap-2 text-xs text-red-300 bg-red-900/40 rounded px-3 py-1.5 border border-red-700/40">
+                    <AlertCircle size={12} className="flex-shrink-0" />
+                    <span className="flex-1">{recorderError}</span>
+                    <button onClick={() => setRecorderError(null)} className="text-red-600 hover:text-red-300">×</button>
+                  </div>
+                )}
               </div>
             )}
 

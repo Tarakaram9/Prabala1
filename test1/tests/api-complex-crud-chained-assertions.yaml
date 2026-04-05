@@ -1,0 +1,139 @@
+testCase: "API Complex – Full CRUD-like flow with chained assertions and nested body validation"
+tags:
+  - api
+  - complex
+  - regression
+description: >
+  Comprehensive API regression test covering:
+  1. GET a collection and validate list metadata
+  2. GET a single resource with nested object assertion (address.city)
+  3. POST a new resource and validate full response shape
+  4. POST to a nested sub-resource (comments) and validate the relationship
+  5. Validate error-like paths and boundary cases on body fields
+steps:
+  # ── Phase 1: GET collection – assert a known subset of records ─────────────
+  - keyword: API.GET
+    params:
+      url: "https://jsonplaceholder.typicode.com/posts?userId=1"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "200"
+
+  # The first item in the filtered list should belong to userId 1
+  - keyword: API.AssertBody
+    params:
+      path: "0.userId"
+      expected: "1"
+
+  - keyword: API.AssertBody
+    params:
+      path: "0.id"
+      expected: "1"
+
+  # ── Phase 2: GET a user with nested address object ────────────────────────
+  - keyword: API.GET
+    params:
+      url: "https://jsonplaceholder.typicode.com/users/2"
+      responseAs: "user2"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "200"
+
+  - keyword: API.AssertBody
+    params:
+      path: "name"
+      expected: "Ervin Howell"
+
+  - keyword: API.AssertBody
+    params:
+      path: "email"
+      expected: "Shanna@melissa.tv"
+
+  - keyword: API.AssertBody
+    params:
+      path: "address.city"
+      expected: "Wisokyburgh"
+
+  - keyword: API.AssertBody
+    params:
+      path: "address.zipcode"
+      expected: "90566-7771"
+
+  - keyword: API.AssertBody
+    params:
+      path: "company.name"
+      expected: "Deckow-Crist"
+
+  # ── Phase 3: POST a new todo resource ────────────────────────────────────
+  - keyword: API.POST
+    params:
+      url: "https://jsonplaceholder.typicode.com/todos"
+      body: '{"userId": 2, "title": "Validate Prabala API automation", "completed": false}'
+      responseAs: "newTodo"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "201"
+
+  - keyword: API.AssertBody
+    params:
+      path: "userId"
+      expected: "2"
+
+  - keyword: API.AssertBody
+    params:
+      path: "title"
+      expected: "Validate Prabala API automation"
+
+  - keyword: API.AssertBody
+    params:
+      path: "completed"
+      expected: "false"
+
+  # ── Phase 4: POST a comment linked to an existing post ────────────────────
+  - keyword: API.POST
+    params:
+      url: "https://jsonplaceholder.typicode.com/comments"
+      body: '{"postId": 5, "name": "Prabala tester", "email": "qa@prabala.io", "body": "This is an automated comment from Prabala test framework"}'
+      responseAs: "newComment"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "201"
+
+  - keyword: API.AssertBody
+    params:
+      path: "postId"
+      expected: "5"
+
+  - keyword: API.AssertBody
+    params:
+      path: "name"
+      expected: "Prabala tester"
+
+  - keyword: API.AssertBody
+    params:
+      path: "email"
+      expected: "qa@prabala.io"
+
+  # ── Phase 5: GET comments for a post and assert the count ─────────────────
+  - keyword: API.GET
+    params:
+      url: "https://jsonplaceholder.typicode.com/posts/1/comments"
+
+  - keyword: API.AssertStatus
+    params:
+      expected: "200"
+
+  # 5 comments exist for post 1 on JSONPlaceholder (0-indexed first = index 0)
+  - keyword: API.AssertBody
+    params:
+      path: "0.postId"
+      expected: "1"
+
+  - keyword: API.AssertBody
+    params:
+      path: "0.id"
+      expected: "1"

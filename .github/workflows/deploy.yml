@@ -74,20 +74,8 @@ jobs:
           az containerapp show \
             --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            -o yaml | python3 -c "
-import sys, yaml
-app = yaml.safe_load(sys.stdin)
-tmpl = app['properties']['template']
-vols = tmpl.get('volumes') or []
-if not any(v.get('name') == 'prabala-workspaces' for v in vols):
-    vols.append({'name': 'prabala-workspaces', 'storageType': 'AzureFile', 'storageName': 'prabala-workspaces'})
-tmpl['volumes'] = vols
-mnts = tmpl['containers'][0].get('volumeMounts') or []
-if not any(m.get('mountPath') == '/workspaces' for m in mnts):
-    mnts.append({'volumeName': 'prabala-workspaces', 'mountPath': '/workspaces'})
-tmpl['containers'][0]['volumeMounts'] = mnts
-print(yaml.dump(app, default_flow_style=False))
-" > /tmp/patched.yaml
+            -o yaml > /tmp/app.yaml
+          python3 .github/scripts/patch-volumes.py /tmp/app.yaml /tmp/patched.yaml
           az containerapp update \
             --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \

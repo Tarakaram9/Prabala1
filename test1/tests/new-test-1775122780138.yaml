@@ -1,0 +1,61 @@
+testCase: Test Valut
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: EnterText
+    params:
+      locator: '#username'
+      value: test
+  - keyword: EnterText
+    params:
+      locator: '#password'
+      value: '{{TEST_DATA.PASSWORD}}'
+  - keyword: Click
+    params:
+      locator: button[type='submit']
+  - keyword: WaitForVisible
+    params:
+      locator: '#dashboard'
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/dashboard
+  - keyword: WaitForVisible
+    params:
+      locator: text=🧪 Test Vault Access and manage your test artefact
+      timeout: 10000
+  - keyword: Click
+    params:
+      locator: text=🧪 Test Vault Access and manage your test artefact
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/welcome
+  - keyword: WaitForVisible
+    params:
+      locator: '#cicd-toggle-btn'
+      timeout: 10000
+  - keyword: Click
+    params:
+      locator: '#cicd-toggle-btn'
+  - keyword: WaitForVisible
+    params:
+      locator: text=CI/CD Pipeline Status Hide Build Status Success 20
+      timeout: 10000
+  - keyword: Click
+    params:
+      locator: text=CI/CD Pipeline Status Hide Build Status Success 20
+  - keyword: Click
+    params:
+      locator: text=Hide
+  - keyword: Click
+    params:
+      locator: text=🚪 Sign Out
+  - keyword: WaitForVisible
+    params:
+      locator: text=Login
+      timeout: 10000
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Web.Close

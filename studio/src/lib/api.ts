@@ -98,12 +98,18 @@ function openFolderDialog(): Promise<string | undefined> {
 const api = {
   fs: {
     async readFile(filePath: string): Promise<string> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.readFile(filePath)
       return get<string>('/fs/read', { path: filePath })
     },
     async writeFile(filePath: string, content: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.writeFile(filePath, content)
       await post('/fs/write', { path: filePath, content })
     },
     async readDir(dirPath: string): Promise<{ name: string; isDir: boolean; path: string }[]> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.readDir(dirPath)
       const result = await get<unknown>('/fs/dir', { path: dirPath })
       if (!Array.isArray(result)) {
         const err = (result as { error?: string })?.error ?? `Cannot read directory: ${dirPath}`
@@ -112,22 +118,34 @@ const api = {
       return result as { name: string; isDir: boolean; path: string }[]
     },
     async exists(filePath: string): Promise<boolean> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.exists(filePath)
       const r = await get<{ exists: boolean }>('/fs/exists', { path: filePath })
       return r.exists
     },
     async deleteFile(filePath: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.deleteFile(filePath)
       await del('/fs/file', { path: filePath })
     },
     async mkdir(dirPath: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.mkdir(dirPath)
       await post('/fs/mkdir', { path: dirPath })
     },
     async deleteDir(dirPath: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.deleteDir(dirPath)
       await del('/fs/dir', { path: dirPath })
     },
     async rename(oldPath: string, newPath: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.rename(oldPath, newPath)
       await post('/fs/rename', { oldPath, newPath })
     },
     async moveFile(srcPath: string, destPath: string): Promise<void> {
+      const ipc = (window as any).prabala?.fs
+      if (ipc) return ipc.moveFile(srcPath, destPath)
       await post('/fs/move', { srcPath, destPath })
     },
   },
@@ -343,5 +361,7 @@ const electronBridge = typeof window !== 'undefined' ? (window as Window & { pra
 // In Electron, window.prabala provides IPC-backed methods but is missing REST-only
 // sections (results, schedules, aiImpact, _wsOff). Merge so IPC wins where it
 // exists and the REST fallback fills in any gaps.
-export default electronBridge ? { ...api, ...electronBridge } : api
+// NOTE: api.recorder is preserved (not overwritten by electronBridge.recorder) because
+// it already delegates to IPC internally AND contains REST-only methods like onScreenshot.
+export default electronBridge ? { ...api, ...electronBridge, recorder: api.recorder } : api
 export type PrabalaApi = typeof api

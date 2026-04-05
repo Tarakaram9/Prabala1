@@ -21,6 +21,9 @@
   if (studioMeta) {
     // Save this origin so content scripts on other tabs can make requests to it
     await chrome.storage.local.set({ studioOrigin: location.origin });
+    // postMessage crosses the content-script isolation boundary into the page's
+    // JS context — CustomEvent/dispatchEvent does NOT (isolated world).
+    window.postMessage({ type: 'prabala-extension-ready', version: '1.2.0' }, location.origin);
     return; // nothing more to do on the Studio page itself
   }
 

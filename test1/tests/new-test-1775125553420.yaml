@@ -1,0 +1,37 @@
+testCase: Dasbhoard
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: EnterText
+    params:
+      locator: '#username'
+      value: '{{TEST_DATA.username}}'
+  - keyword: EnterText
+    params:
+      locator: '#password'
+      value: '{{TEST_DATA.password}}'
+  - keyword: PressKey
+    params:
+      key: Enter
+  - keyword: Click
+    params:
+      locator: text=Login
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/dashboard
+  - keyword: WaitForVisible
+    params:
+      locator: text=Quick Navigate
+      timeout: 60000
+  - keyword: Click
+    params:
+      locator: text=Ctrl + K Quick Navigate Cognitest | AI Quality Eng
+  - keyword: Click
+    params:
+      locator: text=🚪 Sign Out
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Web.Close
