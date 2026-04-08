@@ -6,6 +6,10 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
+// Enable CDP remote debugging so Prabala desktop driver can interact with
+// elements via Chrome DevTools Protocol instead of System Events JXA.
+app.commandLine.appendSwitch('remote-debugging-port', '9222');
+
 let mainWindow;
 
 function createWindow() {
@@ -30,6 +34,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Required for macOS System Events / JXA to see the BrowserWindow's
+  // web content in the accessibility tree (aria-labels, roles, etc.)
+  app.setAccessibilitySupportEnabled(true);
+
   createWindow();
 
   app.on('activate', () => {

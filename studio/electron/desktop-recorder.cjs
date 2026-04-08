@@ -197,6 +197,102 @@ function runJxa(script, extra) {
   return JSON.parse(out.trim() || 'null');
 }
 
+// ── macOS: JXA monitor script (synchronous polling loop) ─────────────────────
+// Polls every 150 ms using NSThread.sleepForTimeInterval (works reliably in
+// osascript context — no NSRunLoop/NSTimer/addGlobalMonitor required).
+// Detects clicks via NSEvent.pressedMouseButtons + AXUIElementCopyElementAtPosition.
+// Detects text-field changes via AXFocusedUIElement value tracking.
+const JXA_MONITOR = `
+ObjC.import('AppKit');
+ObjC.import('ApplicationServices');
+
+// ── args ───────────────────────────────────────────────────────────────────
+var pargs = $.NSProcessInfo.processInfo.arguments;
+// argv: [osascript, -l, JavaScript, scriptPath, targetName?]
+var targetName = pargs.count > 4 ? ObjC.unwrap(pargs.objectAtIndex(4)) : '';
+
+// ── stdout helper ──────────────────────────────────────────────────────────
+var stdout = $.NSFileHandle.fileHandleWithStandardOutput;
+function emitLine(obj) {
+  try {
+    stdout.writeData($(JSON.stringify(obj) + '\\n').dataUsingEncoding(4));
+  } catch(e) {}
+}
+
+// ── AX helpers ─────────────────────────────────────────────────────────────
+var sysWide = $.AXUIElementCreateSystemWide();
+
+function axAttr(el, attr) {
+  try {
+    var r = Ref();
+    if ($.AXUIElementCopyAttributeValue(el, $(attr), r) !== 0) return '';
+    var v = ObjC.unwrap(r[0]);
+    return (typeof v === 'string') ? v : '';
+  } catch(e) { return ''; }
+}
+
+function locatorFor(el) {
+  var id = axAttr(el, 'AXIdentifier');
+  if (id && id.trim() && id.length < 80) return 'id=' + id.trim();
+  var title = axAttr(el, 'AXTitle') || axAttr(el, 'AXDescription');
+  if (title && title.trim() && title.length < 80) return 'name=' + title.trim();
+  var val = axAttr(el, 'AXValue');
+  if (val && val.trim() && val.length < 60) return 'value=' + val.trim();
+  return 'role=' + (axAttr(el, 'AXRole') || 'Element');
+}
+
+// ── state ──────────────────────────────────────────────────────────────────
+var lastDown     = false;
+var prevTextKey  = '';
+var prevTextVal  = '';
+var screenH      = ObjC.unwrap($.NSScreen.mainScreen.frame).size.height;
+var TEXT_ROLES   = ['AXTextField','AXTextArea','AXComboBox','AXSearchField','AXSecureTextField'];
+
+emitLine({ __ready: true });
+
+// ── main loop ──────────────────────────────────────────────────────────────
+while (true) {
+  $.NSThread.sleepForTimeInterval(0.15);
+
+  // ── click detection ──────────────────────────────────────────────────
+  try {
+    var down = ($.NSEvent.pressedMouseButtons & 1) === 1;
+    if (down && !lastDown) {
+      var mLoc = $.NSEvent.mouseLocation;
+      // NSEvent y is from bottom-left; AX wants y from top-left → flip
+      var elRef = Ref();
+      if ($.AXUIElementCopyElementAtPosition(sysWide, mLoc.x, screenH - mLoc.y, elRef) === 0) {
+        emitLine({ keyword: 'Desktop.Click', params: { locator: locatorFor(elRef[0]) } });
+      }
+    }
+    lastDown = down;
+  } catch(e) {}
+
+  // ── text-field value change detection ────────────────────────────────
+  try {
+    var focRef = Ref();
+    if ($.AXUIElementCopyAttributeValue(sysWide, $('AXFocusedUIElement'), focRef) === 0) {
+      var focEl  = focRef[0];
+      var role   = axAttr(focEl, 'AXRole');
+      if (TEXT_ROLES.indexOf(role) >= 0) {
+        var title  = axAttr(focEl, 'AXTitle') || axAttr(focEl, 'AXDescription') || '';
+        var curVal = axAttr(focEl, 'AXValue') || '';
+        var key    = role + ':' + title;
+        if (key !== prevTextKey) {
+          // newly focused field — reset baseline, do not emit
+          prevTextKey = key;
+          prevTextVal = curVal;
+        } else if (curVal !== prevTextVal && curVal.trim()) {
+          var loc = title ? 'name=' + title.trim() : 'role=' + role;
+          emitLine({ keyword: 'Desktop.EnterText', params: { locator: loc, value: curVal } });
+          prevTextVal = curVal;
+        }
+      }
+    }
+  } catch(e) {}
+}
+`.trim();
+
 // ── macOS: launch app ─────────────────────────────────────────────────────────
 
 function macLaunchApp(appPath) {
@@ -365,6 +461,214 @@ function diffWinNodes(curr) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CDP recorder — for Electron apps
+// ═════════════════════════════════════════════════════════════════════════════
+
+const http = require('http');
+const net  = require('net');
+const crypto = require('crypto');
+
+/** Poll CDP /json until a page target appears, or return null on timeout. */
+function detectCdp(port, timeoutMs) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    function attempt() {
+      http.get({ hostname: '127.0.0.1', port, path: '/json', timeout: 600 }, (res) => {
+        let d = '';
+        res.on('data', x => d += x);
+        res.on('end', () => {
+          try {
+            const targets = JSON.parse(d);
+            const pg = targets.find(t => t.type === 'page') || targets[0];
+            resolve(pg ? pg.webSocketDebuggerUrl : null);
+          } catch { tryLater(); }
+        });
+      }).on('error', () => tryLater());
+    }
+    function tryLater() {
+      if (Date.now() < deadline) setTimeout(attempt, 400);
+      else resolve(null);
+    }
+    attempt();
+  });
+}
+
+/** Map an element's attributes to the best Prabala locator (name= preferred). */
+function cdpBestLocator(el) {
+  if (el.ariaLabel)      return `name=${el.ariaLabel}`;
+  if (el.id && !/^\d/.test(el.id)) return `id=${el.id}`;
+  if (el.placeholder)   return `name=${el.placeholder}`;
+  if (el.name && el.tag === 'button') return `name=${el.name}`;
+  if (el.textContent)   return `name=${el.textContent}`;
+  return `role=${el.role || 'Element'}`;
+}
+
+/** Send one CDP command over a WebSocket and return the result. */
+function cdpSend(sock, send, id, method, params) {
+  send(JSON.stringify({ id, method, params }));
+}
+
+/**
+ * Inject a CDP event listener script into the page that emits click / input
+ * events back to us via Runtime.bindingCalled, then stream those events.
+ */
+async function runCdpRecorder(wsUrl) {
+  const url  = new URL(wsUrl);
+  const port = parseInt(url.port) || 9222;
+
+  await new Promise((resolve) => {
+    const sock = net.createConnection(port, url.hostname);
+    const key  = crypto.randomBytes(16).toString('base64');
+    let upgraded = false, rxBuf = Buffer.alloc(0), cmdId = 1;
+
+    function send(text) {
+      const p = Buffer.from(text, 'utf8');
+      const m = crypto.randomBytes(4);
+      const ms = Buffer.allocUnsafe(p.length);
+      for (let i = 0; i < p.length; i++) ms[i] = p[i] ^ m[i % 4];
+      const hdr = p.length <= 125
+        ? [0x81, 0x80 | p.length, ...m]
+        : [0x81, 0xFE, (p.length >> 8) & 0xFF, p.length & 0xFF, ...m];
+      sock.write(Buffer.concat([Buffer.from(hdr), ms]));
+    }
+
+    function parseFrames(buf) {
+      const frames = [];
+      while (buf.length >= 2) {
+        let plen = buf[1] & 0x7F, off = 2;
+        if (plen === 126) { if (buf.length < 4) break; plen = (buf[2] << 8) | buf[3]; off = 4; }
+        else if (plen === 127) { if (buf.length < 10) break; plen = buf.readUInt32BE(6); off = 10; }
+        if (buf.length < off + plen) break;
+        frames.push(buf.slice(off, off + plen).toString('utf8'));
+        buf = buf.slice(off + plen);
+      }
+      return { frames, remaining: buf };
+    }
+
+    // JS injected into the Electron page to capture clicks + text input
+    const INJECT = `
+(function() {
+  if (window.__prabalaRecActive) return;
+  window.__prabalaRecActive = true;
+
+  function bestLocator(el) {
+    if (!el) return 'role=Element';
+    var a = el.getAttribute('aria-label'); if (a) return 'name=' + a;
+    if (el.id && !/^\\d/.test(el.id)) return 'id=' + el.id;
+    var ph = el.getAttribute('placeholder'); if (ph) return 'name=' + ph;
+    var txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g,' ').slice(0,50);
+    if (txt && !['INPUT','TEXTAREA','SELECT'].includes(el.tagName)) return 'name=' + txt;
+    return 'role=' + (el.getAttribute('role') || el.tagName.toLowerCase());
+  }
+
+  // Click capture
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    window.__prabalaEvent(JSON.stringify({ type:'click', locator: bestLocator(el) }));
+  }, true);
+
+  // Text input capture (debounced 600ms after last keystroke)
+  var inputTimers = new WeakMap();
+  document.addEventListener('input', function(e) {
+    var el = e.target;
+    if (!['INPUT','TEXTAREA'].includes(el.tagName)) return;
+    if (inputTimers.has(el)) clearTimeout(inputTimers.get(el));
+    inputTimers.set(el, setTimeout(function() {
+      window.__prabalaEvent(JSON.stringify({ type:'input', locator: bestLocator(el), value: el.value }));
+    }, 600));
+  }, true);
+
+  // Select change
+  document.addEventListener('change', function(e) {
+    var el = e.target;
+    if (el.tagName !== 'SELECT') return;
+    window.__prabalaEvent(JSON.stringify({ type:'select', locator: bestLocator(el), value: el.value }));
+  }, true);
+})();
+`.trim();
+
+    sock.on('connect', () => {
+      sock.write([
+        `GET ${url.pathname} HTTP/1.1`,
+        `Host: ${url.host}`,
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        `Sec-WebSocket-Key: ${key}`,
+        'Sec-WebSocket-Version: 13',
+        '', '',
+      ].join('\r\n'));
+    });
+
+    sock.on('data', (data) => {
+      if (!upgraded) {
+        if (data.toString('utf8').includes('HTTP/1.1 101')) {
+          upgraded = true;
+          const hEnd = data.indexOf('\r\n\r\n');
+          if (hEnd !== -1) rxBuf = data.slice(hEnd + 4);
+          // Step 1: add a binding that the injected script can call
+          cdpSend(sock, send, cmdId++, 'Runtime.addBinding', { name: '__prabalaEvent' });
+        }
+        return;
+      }
+
+      rxBuf = Buffer.concat([rxBuf, data]);
+      const parsed = parseFrames(rxBuf);
+      rxBuf = parsed.remaining;
+
+      for (const text of parsed.frames) {
+        let msg;
+        try { msg = JSON.parse(text); } catch { continue; }
+
+        // After addBinding ack, inject the recorder script
+        if (msg.id === 1 && msg.result !== undefined) {
+          cdpSend(sock, send, cmdId++, 'Runtime.evaluate', {
+            expression: INJECT, returnByValue: true
+          });
+        }
+
+        // Runtime.bindingCalled carries our events
+        if (msg.method === 'Runtime.bindingCalled' && msg.params && msg.params.name === '__prabalaEvent') {
+          try {
+            const ev = JSON.parse(msg.params.payload);
+            if (ev.type === 'click') {
+              emit({ keyword: 'Desktop.Click', params: { locator: ev.locator } });
+            } else if (ev.type === 'input' && ev.value) {
+              emit({ keyword: 'Desktop.EnterText', params: { locator: ev.locator, value: ev.value } });
+            } else if (ev.type === 'select') {
+              emit({ keyword: 'Desktop.EnterText', params: { locator: ev.locator, value: ev.value } });
+            }
+          } catch { /* ignore */ }
+          captureScreenshot();
+        }
+      }
+    });
+
+    sock.on('error', (err) => {
+      emit({ __error: `CDP recorder error: ${err.message}` });
+      resolve();
+    });
+
+    // Stop on process signal
+    function cleanup() {
+      try { sock.destroy(); } catch { /* ignore */ }
+      resolve();
+    }
+    process.on('SIGTERM', cleanup);
+    process.on('SIGINT', cleanup);
+    process.on('message', (msg) => { if (msg && msg.type === 'stop') cleanup(); });
+
+    const screenshotTimer = setInterval(captureScreenshot, SCREENSHOT_INTERVAL_MS);
+    sock.on('close', () => {
+      clearInterval(screenshotTimer);
+      resolve();
+    });
+  });
+
+  emit({ __done: true });
+  process.exit(0);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Main
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -403,6 +707,69 @@ async function run() {
   // ── Initial screenshot ─────────────────────────────────────────────────────
   await captureScreenshot();
 
+  // ── macOS: try CDP first (Electron apps), fall back to JXA ──────────────────
+  if (isMac) {
+    const cdpWsUrl = await detectCdp(9222, 3000);
+    if (cdpWsUrl) {
+      process.stderr.write(`[Desktop Recorder] Electron app detected — using CDP recorder\n`);
+      await runCdpRecorder(cdpWsUrl);
+      return;
+    }
+
+    const tmpScript = path.join(os.tmpdir(), `prabala-recorder-${Date.now()}.js`);
+    fs.writeFileSync(tmpScript, JXA_MONITOR, 'utf8');
+    process.stderr.write(`[Desktop Recorder] Spawning JXA event monitor\n`);
+
+    const monitorProc = spawn('osascript', ['-l', 'JavaScript', tmpScript, targetName || ''], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let lineBuf = '';
+    monitorProc.stdout.on('data', (chunk) => {
+      lineBuf += chunk.toString('utf8');
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (!obj.__ready) emit(obj);
+        } catch { /* ignore malformed */ }
+      }
+    });
+
+    monitorProc.stderr.on('data', (d) => {
+      const msg = d.toString().trim();
+      process.stderr.write(`[JXA Monitor] ${msg}\n`);
+      if (msg.includes('not allowed assistive') || msg.includes('1003') || msg.includes('AXError')) {
+        emit({ __error: 'Accessibility permission denied.\nGo to System Settings → Privacy & Security → Accessibility\nand enable permission for Terminal / Electron / Prabala.' });
+      }
+    });
+
+    monitorProc.on('error', (err) => {
+      emit({ __error: `Failed to start JXA monitor: ${err.message}` });
+    });
+
+    const screenshotTimer = setInterval(captureScreenshot, SCREENSHOT_INTERVAL_MS);
+
+    const cleanup = () => {
+      clearInterval(screenshotTimer);
+      try { monitorProc.kill('SIGTERM'); } catch { /* ignore */ }
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
+    };
+
+    process.on('SIGTERM', cleanup);
+    process.on('SIGINT', cleanup);
+    process.on('message', (msg) => { if (msg && msg.type === 'stop') cleanup(); });
+
+    await new Promise(resolve => monitorProc.on('close', resolve));
+    try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
+    emit({ __done: true });
+    process.exit(0);
+    return;
+  }
+
+  // ── Windows: polling loop ────────────────────────────────────────────────────
   let errorsInRow = 0;
   let screenshotTick = 0;
 
@@ -411,25 +778,17 @@ async function run() {
     if (stopping) break;
 
     try {
-      let steps = [];
-      if (isMac) {
-        const nodes = runJxa(JXA_AX, targetName || undefined);
-        if (Array.isArray(nodes)) steps = diffMacNodes(nodes);
-      } else {
-        const nodes = runPs(PS_DUMP, targetName || undefined);
-        if (Array.isArray(nodes)) steps = diffWinNodes(nodes);
+      const nodes = runPs(PS_DUMP, targetName || undefined);
+      if (Array.isArray(nodes)) {
+        const steps = diffWinNodes(nodes);
+        for (const s of steps) emit(s);
       }
-      for (const s of steps) emit(s);
       errorsInRow = 0;
     } catch (err) {
       errorsInRow++;
       process.stderr.write(`[Desktop Recorder] poll error (${errorsInRow}): ${err.message}\n`);
       if (errorsInRow >= MAX_ERRORS) {
-        let msg = err.message;
-        if (isMac && msg.includes('not allowed assistive')) {
-          msg = 'Accessibility permission denied.\nGo to System Settings → Privacy & Security → Accessibility\nand enable permission for Terminal / Electron / Prabala.';
-        }
-        emit({ __error: msg });
+        emit({ __error: err.message });
         break;
       }
     }

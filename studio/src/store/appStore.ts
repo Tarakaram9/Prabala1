@@ -258,8 +258,8 @@ export const useAppStore = create<AppState>((set) => ({
   login: (username, password) => {
     if (USERS[username] && USERS[username] === password) {
       const user: AuthUser = { username }
-      localStorage.setItem('prabala_user', JSON.stringify(user))
-      localStorage.removeItem('prabala_workspace')
+      // Do NOT persist the user in localStorage — the login page must always
+      // be shown on every app launch (Electron main clears it on startup too).
       set({ currentUser: user, loginError: null, workspace: null, projectDir: null })
       return true
     }

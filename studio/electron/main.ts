@@ -89,6 +89,13 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
   }
 
+  // Clear stored auth on every launch so the Login page is always shown.
+  mainWindow.webContents.once('did-finish-load', () => {
+    mainWindow?.webContents.executeJavaScript(
+      `localStorage.removeItem('prabala_user'); localStorage.removeItem('prabala_workspace');`
+    ).catch(() => {});
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
@@ -191,6 +198,9 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('fs:moveFile', (_e, srcPath: string, destPath: string) => {
+    if (!srcPath) throw new Error('moveFile: srcPath is empty');
+    if (!destPath) throw new Error('moveFile: destPath is empty');
+    if (!fs.existsSync(srcPath)) throw new Error(`moveFile: source does not exist: ${srcPath}`);
     try {
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
       try {
@@ -206,7 +216,7 @@ function registerIpcHandlers(): void {
       }
       return true;
     } catch (err: any) {
-      throw new Error(err.message ?? String(err));
+      throw new Error(`moveFile failed (${srcPath} → ${destPath}): ${err.message ?? String(err)}`);
     }
   });
 

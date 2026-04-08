@@ -44,19 +44,19 @@ export const desktopKeywords: KeywordDefinition[] = [
   {
     name: 'Desktop.LaunchApp',
     description: [
-      'Launch a desktop application via Appium.',
-      'Requires Appium server running (appium &) with the appropriate driver installed.',
-      'appPath: .app path or bundle ID on macOS; .exe path on Windows.',
-      'platform: darwin|mac|win32|windows|linux — auto-detected if omitted.',
-      'appiumUrl: Appium server URL, default http://localhost:4723.',
+      'Launch a desktop application using native OS accessibility APIs (no Appium required).',
+      'macOS: appPath can be a .app path (/Applications/MyApp.app) or bundle ID (com.example.app).',
+      'Windows: appPath is the .exe path.',
+      'platform: darwin|mac|win32|windows — auto-detected if omitted.',
     ].join(' '),
-    params: ['appPath', 'platform', 'appiumUrl'],
+    params: ['appPath', 'platform'],
     execute: async (params, context) => {
       const session = new DesktopSession();
       await session.launch({
         appPath:   String(params.appPath),
         platform:  params.platform  ? String(params.platform)  : undefined,
         appiumUrl: params.appiumUrl ? String(params.appiumUrl) : undefined,
+        cdpPort:   params.cdpPort   ? Number(params.cdpPort)   : undefined,
       });
       context.driverInstances['desktop'] = session;
       context.currentDriver = 'desktop';
@@ -66,7 +66,7 @@ export const desktopKeywords: KeywordDefinition[] = [
 
   {
     name: 'Desktop.CloseApp',
-    description: 'Close the desktop application and end the Appium session.',
+    description: 'Close the desktop application.',
     params: [],
     execute: async (_params, context) => {
       const session = context.driverInstances['desktop'] as DesktopSession | undefined;

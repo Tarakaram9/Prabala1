@@ -272,15 +272,30 @@ export default function TestExplorer(props: TestExplorerProps) {
 
   const doMoveTest = useCallback(async (tc: TestCase, destFolderPath: string) => {
     if (!ipc) return
-    const filename = tc.filePath.split('/').pop()!
+    if (!tc.filePath) {
+      setExplorerError('Cannot move an unsaved test. Please save it first.')
+      return
+    }
+    const filename = tc.filePath.split('/').pop()
+    if (!filename) {
+      setExplorerError('Cannot determine file name for this test.')
+      return
+    }
     const newPath = `${destFolderPath}/${filename}`
     if (newPath === tc.filePath) return
+    // Check source exists before attempting move
+    const exists = await ipc.fs.exists(tc.filePath).catch(() => false)
+    if (!exists) {
+      setExplorerError(`Source file not found: ${tc.filePath}. Save the test first.`)
+      return
+    }
     setBusy(true)
     try {
       await ipc.fs.moveFile(tc.filePath, newPath)
       setExplorerError(null)
     } catch (e: any) {
-      setExplorerError(`Failed to move test: ${e.message}`)
+      const msg = e?.message ?? String(e)
+      setExplorerError(`Failed to move test: ${msg}`)
     } finally {
       setBusy(false)
       await onRescan()

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAppStore, TestCase, TestStep, ComponentDef } from '../store/appStore'
+import { useAppStore, TestCase, TestStep, ComponentDef, ObjectEntry } from '../store/appStore'
 import {
   Plus, Trash2, Save, GripVertical, ChevronDown,
   ChevronRight, FilePlus, Tag, Copy, Circle, Square, Wifi,
@@ -411,6 +411,10 @@ export default function TestBuilderPage() {
     api.desktopRecorder.onStep((step: { keyword: string; params: Record<string, string> }) => {
       ingestStep(step)
       setDesktopRecordedCount(n => n + 1)
+      // Auto-register each interacted element in the object repository
+      if (step.params?.locator) {
+        autoSaveDesktopElement(step.params.locator).catch(() => {})
+      }
     })
     api.desktopRecorder.onDone(() => {
       setIsDesktopRecording(false)
@@ -487,6 +491,52 @@ export default function TestBuilderPage() {
     setSpyTarget(null)
     setIsSpying(false)
     setSpyError(null)
+  }
+
+  // ─ Auto-save element to object-repository during desktop recording ──────────
+  // Parses the locator string (e.g. "name=Login", "id=btnOK"), derives a
+  // kebab-case key, and upserts the entry into the store + desktop.yaml file.
+  async function autoSaveDesktopElement(locatorStr: string) {
+    if (!locatorStr || !projectDir) return
+
+    let strategy: string
+    let locValue: string
+    if      (locatorStr.startsWith('id='))    { strategy = 'id';   locValue = locatorStr.slice(3) }
+    else if (locatorStr.startsWith('name='))  { strategy = 'name'; locValue = locatorStr.slice(5) }
+    else if (locatorStr.startsWith('value=')) { strategy = 'name'; locValue = locatorStr.slice(6) }
+    else if (locatorStr.startsWith('role='))  { strategy = 'role'; locValue = locatorStr.slice(5) }
+    else return
+
+    locValue = locValue.trim()
+    if (!locValue) return
+
+    const current = useAppStore.getState().objects
+    // Skip if an entry with the exact same strategy+locator already exists
+    if (current.some(o => o.strategy === strategy && o.locator === locValue)) return
+
+    const baseKey = locValue.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (!baseKey) return
+    const key = current.some(o => o.key === baseKey) ? `${baseKey}-${Date.now()}` : baseKey
+
+    const newEntry: ObjectEntry = { key, strategy, locator: locValue, description: locValue, page: 'desktop' }
+    const updated = [...current, newEntry]
+    useAppStore.getState().setObjects(updated)
+
+    // Write only the desktop page objects to object-repository/desktop.yaml
+    const desktopObjs = updated.filter(o => (o.page ?? 'default') === 'desktop')
+    const pageData: Record<string, any> = {}
+    for (const obj of desktopObjs) {
+      pageData[obj.key] = {
+        strategy: obj.strategy,
+        locator: obj.locator,
+        description: obj.description,
+        ...(obj.fallbacks?.length ? { fallbacks: obj.fallbacks } : {}),
+      }
+    }
+    const content = yaml.dump({ objects: pageData }, { lineWidth: 120 })
+    try {
+      await api.fs.writeFile(`${projectDir}/object-repository/desktop.yaml`, content)
+    } catch { /* non-fatal */ }
   }
 
   // Append a recorded step into the active test case via atomic store update

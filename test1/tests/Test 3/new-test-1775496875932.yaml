@@ -1,0 +1,28 @@
+testCase: Desktop2
+steps:
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: /Users/ram/prabala/desktop-demo-app/dist/mac/PrabalaTaskManager.app
+      platform: mac
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Username
+      timeout: 10000
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      value: admin
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      value: admin123
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+  - keyword: Desktop.WaitForVisible
+    params:
+      locator: name=Tasks Tab
+  - keyword: Desktop.AssertVisible
+    params:
+      locator: name=Tasks Tab
+  - keyword: Desktop.CloseApp
