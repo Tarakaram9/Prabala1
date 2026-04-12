@@ -238,6 +238,16 @@ const api = {
   },
 
   desktopRecorder: {
+    async checkPermission(): Promise<boolean> {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc?.checkPermission) return ipc.checkPermission()
+      return true // web mode — no native permission needed
+    },
+    async requestPermission(): Promise<boolean> {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc?.requestPermission) return ipc.requestPermission()
+      return true
+    },
     async start(appPath: string, appiumUrl = 'http://localhost:4723'): Promise<void> {
       const ipc = (window as any).prabala?.desktopRecorder
       if (ipc) return ipc.start(appPath, appiumUrl)
@@ -269,10 +279,15 @@ const api = {
       if (ipc?.onScreenshot) { ipc.onScreenshot(cb); return }
       wsOn('desktopRecorder:screenshot', (p) => cb(p as { __screenshot: string; __screenshotType: string; width: number; height: number }))
     },
+    onAxFallback(cb: (message: string) => void): void {
+      const ipc = (window as any).prabala?.desktopRecorder
+      if (ipc?.onAxFallback) { ipc.onAxFallback(cb); return }
+      wsOn('desktopRecorder:axFallback', (p) => cb(String(p)))
+    },
     removeAllListeners(): void {
       const ipc = (window as any).prabala?.desktopRecorder
       if (ipc) { ipc.removeAllListeners(); return }
-      wsOffAll(['desktopRecorder:step', 'desktopRecorder:done', 'desktopRecorder:error', 'desktopRecorder:screenshot'])
+      wsOffAll(['desktopRecorder:step', 'desktopRecorder:done', 'desktopRecorder:error', 'desktopRecorder:screenshot', 'desktopRecorder:axFallback'])
     },
   },
 
@@ -305,6 +320,11 @@ const api = {
       if (ipc) { ipc.onLocator(cb); return }
       wsOn('spy:locator', (p) => cb(p as { locator: string; tag: string; text: string }))
     },
+    onHover(cb: (result: { locator: string; tag: string; text: string }) => void): void {
+      const ipc = (window as any).prabala?.spy
+      if (ipc) { ipc.onHover(cb); return }
+      wsOn('spy:hover', (p) => cb(p as { locator: string; tag: string; text: string }))
+    },
     onDone(cb: () => void): void {
       const ipc = (window as any).prabala?.spy
       if (ipc) { ipc.onDone(cb); return }
@@ -318,7 +338,7 @@ const api = {
     removeAllListeners(): void {
       const ipc = (window as any).prabala?.spy
       if (ipc) { ipc.removeAllListeners(); return }
-      wsOffAll(['spy:locator', 'spy:done', 'spy:error'])
+      wsOffAll(['spy:locator', 'spy:hover', 'spy:done', 'spy:error'])
     },
   },
 

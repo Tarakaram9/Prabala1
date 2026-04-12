@@ -286,10 +286,11 @@ export default function TestBuilderPage() {
   const [isDesktopRecording, setIsDesktopRecording] = useState(false)
   const [desktopRecorderBarOpen, setDesktopRecorderBarOpen] = useState(false)
   const [selectedAppPath, setSelectedAppPath] = useState<string | null>(null)
-  // desktopAppiumUrl removed — recorder no longer uses Appium
   const [desktopRecordedCount, setDesktopRecordedCount] = useState(0)
   const [desktopRecorderError, setDesktopRecorderError] = useState<string | null>(null)
   const [desktopRecorderScreenshot, setDesktopRecorderScreenshot] = useState<string | null>(null)
+  // When AX is unavailable the recorder falls back to position=x,y locators
+  const [desktopAxFallback, setDesktopAxFallback] = useState<string | null>(null)
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -301,6 +302,7 @@ export default function TestBuilderPage() {
   const [spyUrl, setSpyUrl] = useState('')
   const [isSpying, setIsSpying] = useState(false)
   const [spyError, setSpyError] = useState<string | null>(null)
+  const [desktopSpyHover, setDesktopSpyHover] = useState<{ locator: string; tag: string; text: string } | null>(null)
 
   // Cmd+S / Ctrl+S shortcut
   useEffect(() => {
@@ -399,11 +401,33 @@ export default function TestBuilderPage() {
   }
 
   async function doStartDesktopRecording() {
-    if (!tc || !selectedAppPath) return
+    if (!tc) return
 
     setDesktopRecordedCount(0)
     setDesktopRecorderError(null)
     setDesktopRecorderScreenshot(null)
+    setDesktopAxFallback(null)
+
+    // Pre-flight: check macOS accessibility permission (Electron app level).
+    // If denied, show the error in the bar and do NOT start the recorder.
+    try {
+      const permitted = await api.desktopRecorder.checkPermission()
+      if (!permitted) {
+        // requestPermission opens System Preferences → Accessibility
+        await api.desktopRecorder.requestPermission?.()
+        setDesktopRecorderError(
+          'Accessibility permission required.\n\n' +
+          'System Settings has been opened for you:\n' +
+          '  Privacy & Security → Accessibility\n\n' +
+          'Add both:\n' +
+          '  • Prabala  (or "Electron" in dev mode)\n' +
+          '  • osascript  (/usr/bin/osascript)\n\n' +
+          'Then click "Desktop Record" again.'
+        )
+        return
+      }
+    } catch { /* ignore — web mode has no permission check */ }
+
     setIsDesktopRecording(true)
     setDesktopRecorderBarOpen(false)
 
@@ -412,7 +436,7 @@ export default function TestBuilderPage() {
       ingestStep(step)
       setDesktopRecordedCount(n => n + 1)
       // Auto-register each interacted element in the object repository
-      if (step.params?.locator) {
+      if (step.params?.locator && !step.params.locator.startsWith('position=')) {
         autoSaveDesktopElement(step.params.locator).catch(() => {})
       }
     })
@@ -431,8 +455,13 @@ export default function TestBuilderPage() {
       setDesktopRecorderScreenshot(`data:image/png;base64,${frame.__screenshot}`)
     })
 
+    // Listen for AX fallback notification (recorder running without element names)
+    api.desktopRecorder.onAxFallback((msg: string) => {
+      setDesktopAxFallback(msg)
+    })
+
     try {
-      await api.desktopRecorder.start(selectedAppPath)
+      await api.desktopRecorder.start(selectedAppPath ?? '')
     } catch (err: any) {
       setDesktopRecorderError(err?.message || 'Failed to start desktop recorder')
       setIsDesktopRecording(false)
@@ -445,14 +474,18 @@ export default function TestBuilderPage() {
     setIsDesktopRecording(false)
     setDesktopRecorderError(null)
     setDesktopRecorderScreenshot(null)
+    setDesktopAxFallback(null)
     scheduleAutoAnalysis('Desktop recording completed', 500)
   }
 
   // ─ Spy ────────────────────────────────────────────────────────────────────
   function startSpy(stepId: string, key: string) {
     if (spyMode === 'web' && !spyUrl.trim()) return
-    setSpyAnchor(null)
+    // Desktop spy: keep the popover open so the hover preview is visible.
+    // Web/SAP/mobile spy: close the popover (user interacts with a separate window).
+    if (spyMode !== 'desktop') setSpyAnchor(null)
     setSpyError(null)
+    setDesktopSpyHover(null)
     setSpyTarget({ stepId, key })
     setIsSpying(true)
     api.spy.removeAllListeners()
@@ -470,11 +503,18 @@ export default function TestBuilderPage() {
           })
         }
       }
+      setDesktopSpyHover(null)
+      setSpyAnchor(null)
       setSpyTarget(null)
       setIsSpying(false)
       api.spy.removeAllListeners()
     })
+    api.spy.onHover((result) => {
+      setDesktopSpyHover(result)
+    })
     api.spy.onDone(() => {
+      setDesktopSpyHover(null)
+      setSpyAnchor(null)
       setSpyTarget(null)
       setIsSpying(false)
       api.spy.removeAllListeners()
@@ -488,6 +528,7 @@ export default function TestBuilderPage() {
   function stopSpy() {
     api.spy.stop()
     api.spy.removeAllListeners()
+    setDesktopSpyHover(null)
     setSpyTarget(null)
     setIsSpying(false)
     setSpyError(null)
@@ -541,7 +582,28 @@ export default function TestBuilderPage() {
 
   // Append a recorded step into the active test case via atomic store update
   // (avoids stale-closure overwrite when steps arrive rapidly)
+  // For EnterText: upsert — update the last step if it's the same keyword+locator
+  // so that typing "hello world" becomes one step, not one per word/keystroke.
   function ingestStep(raw: { keyword: string; params: Record<string, string> }) {
+    const isEnterText = raw.keyword === 'Desktop.EnterText' || raw.keyword === 'EnterText'
+    if (isEnterText && raw.params?.locator) {
+      const { activeTestCase: atc, updateTestCase: utc } = useAppStore.getState()
+      if (atc && atc.steps.length > 0) {
+        const last = atc.steps[atc.steps.length - 1]
+        if (last.keyword === raw.keyword && last.params?.locator === raw.params.locator) {
+          // Same field — update value in place instead of appending
+          utc(atc.id, {
+            steps: atc.steps.map((s, i) =>
+              i === atc.steps.length - 1
+                ? { ...s, params: { ...s.params, value: raw.params.value } }
+                : s
+            ),
+          })
+          scheduleAutoAnalysis(`Recorded: ${raw.keyword}`, 3000)
+          return
+        }
+      }
+    }
     const step = newStep(raw.keyword)
     step.params = { ...step.params, ...raw.params }
     appendStepToActive(step)
@@ -1206,7 +1268,7 @@ steps:
             {/* Desktop Recorder bar — settings before starting */}
             {desktopRecorderBarOpen && !isDesktopRecording && (
               <div className="flex-shrink-0 flex flex-col gap-2 px-6 py-3 bg-orange-950/30 border-b border-orange-800/40">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <Monitor size={13} className="text-orange-400 flex-shrink-0" />
                   <span className="text-xs text-orange-300 font-semibold flex-shrink-0">Desktop Record</span>
                   <button
@@ -1220,25 +1282,49 @@ steps:
                       {selectedAppPath.split(/[/\\]/).pop()}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-500">No app selected</span>
+                    <span className="text-xs text-slate-500 italic">No app selected — will track frontmost app</span>
                   )}
-                  <span className="text-xs text-slate-500 ml-2 italic">No Appium required — uses native OS accessibility</span>
                   <button
                     onClick={doStartDesktopRecording}
-                    disabled={!selectedAppPath}
+                    disabled={!tc}
                     className="btn-primary flex items-center gap-1.5 py-1.5 text-xs flex-shrink-0 disabled:opacity-40"
                   >
                     <Monitor size={11} /> Start Recording
                   </button>
-                  <button onClick={() => { setDesktopRecorderBarOpen(false); setDesktopRecorderError(null) }} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
+                  <button onClick={() => { setDesktopRecorderBarOpen(false); setDesktopRecorderError(null) }} className="text-slate-500 hover:text-slate-300 text-xs ml-auto">×</button>
+                </div>
+                {/* Accessibility permission guidance */}
+                <div className="text-xs text-slate-500 bg-slate-800/40 rounded px-3 py-2 border border-slate-700/40 leading-relaxed">
+                  <span className="text-slate-400 font-medium">macOS:</span> Requires <span className="text-orange-400">Accessibility</span> permission.
+                  {' '}Go to <span className="text-slate-300">System Settings → Privacy &amp; Security → Accessibility</span> and add:
+                  <span className="text-orange-300"> osascript</span> (dev) or <span className="text-orange-300">Prabala</span> (packaged app).
+                  {' '}Without it, clicks are still recorded using <span className="text-slate-300">position=x,y</span> locators.
                 </div>
                 {desktopRecorderError && (
-                  <div className="flex items-center gap-2 text-xs text-orange-300 bg-orange-900/40 rounded px-3 py-1.5 border border-orange-700/40">
-                    <AlertCircle size={12} className="flex-shrink-0" />
-                    <span className="flex-1">{desktopRecorderError}</span>
-                    <button onClick={() => setDesktopRecorderError(null)} className="text-orange-600 hover:text-orange-300">×</button>
+                  <div className="flex items-start gap-2 text-xs text-orange-300 bg-orange-900/40 rounded px-3 py-2 border border-orange-700/40">
+                    <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                    <span className="flex-1 whitespace-pre-line">{desktopRecorderError}</span>
+                    <button onClick={() => setDesktopRecorderError(null)} className="text-orange-600 hover:text-orange-300 flex-shrink-0">×</button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Desktop recorder active — AX fallback notice */}
+            {isDesktopRecording && desktopAxFallback && (
+              <div className="flex-shrink-0 flex items-start gap-2 px-6 py-2 bg-yellow-950/30 border-b border-yellow-800/30 text-xs text-yellow-300">
+                <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                <span className="flex-1 whitespace-pre-line">{desktopAxFallback}</span>
+                <button onClick={() => setDesktopAxFallback(null)} className="text-yellow-700 hover:text-yellow-400 flex-shrink-0">×</button>
+              </div>
+            )}
+
+            {/* Desktop recorder active — error notice (shown while still recording) */}
+            {isDesktopRecording && desktopRecorderError && (
+              <div className="flex-shrink-0 flex items-start gap-2 px-6 py-2 bg-orange-950/30 border-b border-orange-800/30 text-xs text-orange-300">
+                <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                <span className="flex-1 whitespace-pre-line">{desktopRecorderError}</span>
+                <button onClick={() => setDesktopRecorderError(null)} className="text-orange-600 hover:text-orange-300 flex-shrink-0">×</button>
               </div>
             )}
 
@@ -1293,14 +1379,12 @@ steps:
                   <span className="text-xs text-red-300 font-semibold">Recording…</span>
                   <span className="text-xs text-slate-400">{recordedCount} step{recordedCount !== 1 ? 's' : ''} captured</span>
                   <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{recordUrl || 'any URL'}</span>
-                  <div className="ml-auto flex items-center gap-2">
-                    {!recorderScreenshot && (
-                      <span className="text-xs text-slate-500">Interact in the recording tab, then click the purple badge to stop</span>
-                    )}
-                    <button onClick={stopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-red-800/50 hover:bg-red-800/80 text-red-300 text-xs transition-colors">
-                      <Square size={11} /> Stop
-                    </button>
-                  </div>
+                  <button
+                    onClick={stopRecording}
+                    className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-semibold shadow transition-colors"
+                  >
+                    <Square size={13} className="fill-white" /> Stop Recording
+                  </button>
                 </div>
 
                 {/* Live browser preview — shown in Docker/web mode when screenshots stream in */}
@@ -1357,12 +1441,12 @@ steps:
                       <span className="text-xs text-orange-300 font-semibold">Desktop Recording…</span>
                       <span className="text-xs text-slate-400">{desktopRecordedCount} step{desktopRecordedCount !== 1 ? 's' : ''} captured</span>
                       <span className="text-xs text-slate-500 font-mono ml-1 truncate max-w-xs">{selectedAppPath ? selectedAppPath.split(/[\/\\]/).pop() : ''}</span>
-                      <div className="ml-auto flex items-center gap-2">
-                        <span className="text-xs text-slate-500">Interact with your desktop app</span>
-                        <button onClick={stopDesktopRecording} className="flex items-center gap-1 px-2 py-1 rounded bg-orange-800/50 hover:bg-orange-800/80 text-orange-300 text-xs transition-colors">
-                          <Square size={11} /> Stop
-                        </button>
-                      </div>
+                      <button
+                        onClick={stopDesktopRecording}
+                        className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold shadow transition-colors"
+                      >
+                        <Square size={13} className="fill-white" /> Stop Recording
+                      </button>
                     </>
                   ) : (
                     <>
@@ -1617,7 +1701,7 @@ steps:
                               {isLocator && (
                                 <button
                                   type="button"
-                                  title={isSpyingThisField ? 'Spy active — click element in browser' : 'Spy: open browser to pick an element'}
+                                  title={isSpyingThisField ? (spyMode === 'desktop' ? 'Desktop Spy active — move mouse and click to capture' : 'Spy active — click element in browser') : 'Spy: open browser to pick an element'}
                                   onClick={e => {
                                     e.stopPropagation()
                                     if (isSpyingThisField) return
@@ -1696,14 +1780,37 @@ steps:
                                         <option value="desktop">Desktop</option>
                                         <option value="mobile">Mobile</option>
                                       </select>
-                                      {spyMode !== 'sap' && (
+                                      {spyMode === 'web' && (
                                         <input
                                           autoFocus
                                           className="input text-xs font-mono w-full"
-                                          placeholder={
-                                            spyMode === 'web' ? 'https://example.com' :
-                                            'http://localhost:4723 (Appium URL)'
-                                          }
+                                          placeholder="https://example.com"
+                                          value={spyUrl}
+                                          onChange={e => setSpyUrl(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') startSpy(step.id, key)
+                                            if (e.key === 'Escape') setSpyAnchor(null)
+                                          }}
+                                        />
+                                      )}
+                                      {spyMode === 'mobile' && (
+                                        <input
+                                          autoFocus
+                                          className="input text-xs font-mono w-full"
+                                          placeholder="http://localhost:4723 (Appium URL)"
+                                          value={spyUrl}
+                                          onChange={e => setSpyUrl(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') startSpy(step.id, key)
+                                            if (e.key === 'Escape') setSpyAnchor(null)
+                                          }}
+                                        />
+                                      )}
+                                      {spyMode === 'desktop' && (
+                                        <input
+                                          autoFocus
+                                          className="input text-xs font-mono w-full"
+                                          placeholder="App name (optional, e.g. Finder)"
                                           value={spyUrl}
                                           onChange={e => setSpyUrl(e.target.value)}
                                           onKeyDown={e => {
@@ -1720,7 +1827,7 @@ steps:
                                     </div>
                                     {spyMode === 'desktop' && (
                                       <p className="text-[10px] text-slate-400 leading-relaxed bg-surface-700/40 border border-surface-600 rounded px-2 py-1.5">
-                                        Connects to Appium and shows the live accessibility tree of your desktop app. Start Appium and launch your app first.
+                                        Uses native OS accessibility APIs — no Appium needed. Click <strong className="text-violet-300">Start Native Spy</strong>, then move the mouse over any element in your desktop app and <strong className="text-violet-300">click</strong> to capture its locator. Position this window alongside your target app so both are visible.
                                       </p>
                                     )}
                                     {spyMode === 'mobile' && (
@@ -1738,6 +1845,32 @@ steps:
                                         {spyError}
                                       </p>
                                     )}
+                                    {/* Live hover preview (desktop spy only) */}
+                                    {isSpying && spyMode === 'desktop' && (
+                                      <div className="bg-surface-900 border border-violet-700/60 rounded px-2 py-1.5 space-y-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse inline-block" />
+                                          <span className="text-[10px] text-violet-300 font-semibold">Hover Preview</span>
+                                          <span className="text-[10px] text-slate-500 ml-auto">move mouse → click to capture</span>
+                                        </div>
+                                        {desktopSpyHover ? (
+                                          <>
+                                            <p className="text-[11px] font-mono text-green-300 break-all">{desktopSpyHover.locator}</p>
+                                            {desktopSpyHover.tag && <p className="text-[10px] text-slate-500">{desktopSpyHover.tag}{desktopSpyHover.text ? ` · ${desktopSpyHover.text.slice(0, 40)}` : ''}</p>}
+                                          </>
+                                        ) : (
+                                          <p className="text-[10px] text-slate-500 italic">Move mouse over your app…</p>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={stopSpy}
+                                          className="mt-1 w-full text-xs text-slate-400 hover:text-red-400 border border-surface-500 rounded py-0.5"
+                                        >
+                                          Cancel Spy
+                                        </button>
+                                      </div>
+                                    )}
+                                    {!(isSpying && spyMode === 'desktop') && (
                                     <div className="flex gap-2">
                                       <button
                                         type="button"
@@ -1746,10 +1879,11 @@ steps:
                                         className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
                                       >
                                         <Crosshair size={11} />
-                                        {spyMode === 'sap' ? 'Connect to SAP GUI' : 'Open Spy Browser'}
+                                        {spyMode === 'sap' ? 'Connect to SAP GUI' : spyMode === 'desktop' ? 'Start Native Spy' : 'Open Spy Browser'}
                                       </button>
                                       <button type="button" onClick={() => setSpyAnchor(null)} className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 border border-surface-500 rounded-lg">Cancel</button>
                                     </div>
+                                    )}
                                   </div>
                                 </div>
                               )}

@@ -1,0 +1,20 @@
+testCase: D3
+steps:
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: /Users/ram/prabala/desktop-demo-app/dist/mac/PrabalaTaskManager.app
+      platform: mac
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      value: admin
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      value: admin123
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+  - keyword: Desktop.Click
+    params:
+      locator: role=svg

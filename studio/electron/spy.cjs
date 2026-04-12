@@ -439,3 +439,7 @@ run().catch((err) => {
   process.stderr.write('[Spy] fatal: ' + String(err) + '\n');
   process.exit(1);
 });
+
+// ── Exports for Electron main process (BrowserWindow-based spy path) ─────────
+module.exports = { LOCATOR_STRATEGY, SPY_UI };
+

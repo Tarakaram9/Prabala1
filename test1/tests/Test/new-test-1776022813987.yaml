@@ -1,0 +1,9 @@
+testCase: Manual
+steps:
+  - keyword: Web.Launch
+    description: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Click
+    description: Username

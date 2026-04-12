@@ -4,7 +4,7 @@
   "description": "Prabala Test Studio – Visual Electron IDE for Prabala automation framework",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"npx ts-node ../packages/studio-server/src/index.ts\" \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "tsc -p tsconfig.electron.json && concurrently -k \"npx ts-node ../packages/studio-server/src/index.ts\" \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:web": "concurrently -k \"npx ts-node ../packages/studio-server/src/index.ts\" \"VITE_TARGET=web vite\"",
     "build": "vite build && tsc -p tsconfig.electron.json",
     "build:web": "VITE_TARGET=web vite build",

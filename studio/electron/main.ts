@@ -2,11 +2,11 @@
 // Prabala Studio – Electron Main Process
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, session, systemPreferences } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { AzureOpenAI } from 'openai';
 
 // Auto-updater — only active in packaged builds
@@ -380,6 +380,9 @@ window.__prabalaGetLocator = function(el) {
       recorderWindow = null;
     }
 
+    // Float Studio above the recording browser so the Stop button stays reachable
+    mainWindow?.setAlwaysOnTop(true, 'floating');
+
     recorderWindow = new BrowserWindow({
       width: 1280,
       height: 820,
@@ -419,6 +422,7 @@ window.__prabalaGetLocator = function(el) {
     recorderWindow.on('closed', () => {
       recorderWindow = null;
       ipcMain.removeAllListeners('recorder:raw-step');
+      mainWindow?.setAlwaysOnTop(false);
       mainWindow?.webContents.send('recorder:done');
     });
 
@@ -439,13 +443,39 @@ window.__prabalaGetLocator = function(el) {
       recorderWindow.close();
     }
     recorderWindow = null;
+    mainWindow?.setAlwaysOnTop(false);
     return true;
   });
 
   // ── Element Spy ───────────────────────────────────────────────────────────────
   let spyProcess: ReturnType<typeof spawn> | null = null;
+  let spyWindow: BrowserWindow | null = null;
+
+  // Preload + spy scripts for the Electron BrowserWindow spy path
+  const spyWindowPreload = isDev
+    ? path.join(__dirname, '..', 'electron', 'spy-window-preload.cjs')
+    : path.join(__dirname, 'spy-window-preload.cjs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { LOCATOR_STRATEGY, SPY_UI } = require(
+    isDev
+      ? path.join(__dirname, '..', 'electron', 'spy.cjs')
+      : path.join(__dirname, 'spy.cjs')
+  );
+
+  // Capture IPC from the spy BrowserWindow preload
+  ipcMain.on('spy:capture', (_e, data: { locator: string; tag: string; text: string }) => {
+    mainWindow?.webContents.send('spy:locator', data);
+    mainWindow?.setAlwaysOnTop(false);
+    // Close spy window shortly after capture so user sees the success banner
+    setTimeout(() => {
+      if (spyWindow && !spyWindow.isDestroyed()) { spyWindow.close(); }
+      spyWindow = null;
+    }, 800);
+  });
 
   ipcMain.handle('spy:start', (_e, url: string, mode: 'web' | 'sap' | 'desktop' | 'mobile' = 'web') => {
+    // Close any previously open spy window / process
+    if (spyWindow && !spyWindow.isDestroyed()) { spyWindow.close(); spyWindow = null; }
     if (spyProcess) { killChild(spyProcess); spyProcess = null; }
 
     const electronDir = isDev
@@ -453,26 +483,80 @@ window.__prabalaGetLocator = function(el) {
       : __dirname;
     const nodeModules = path.join(__dirname, '..', '..', 'node_modules');
 
+    // ── Web spy: use a native Electron BrowserWindow to avoid Playwright-inside-
+    // Electron crash (nested Chromium processes share OS-level internals that
+    // corrupt the child Chromium's IPC setup regardless of env var cleanup).
+    if (mode === 'web') {
+      spyWindow = new BrowserWindow({
+        width: 1280,
+        height: 900,
+        title: '🔮 Prabala Spy — click any element to capture',
+        webPreferences: {
+          preload: spyWindowPreload,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: false,         // allow any target site including http
+        },
+      });
+
+      const injectSpyScripts = () => {
+        spyWindow?.webContents.executeJavaScript(LOCATOR_STRATEGY + '\n' + SPY_UI).catch(() => {});
+      };
+
+      spyWindow.webContents.on('did-finish-load', injectSpyScripts);
+      spyWindow.webContents.on('did-navigate', injectSpyScripts);
+      spyWindow.webContents.on('did-navigate-in-page', (_e, _url, isMainFrame) => {
+        if (isMainFrame) injectSpyScripts();
+      });
+
+      spyWindow.on('closed', () => {
+        spyWindow = null;
+        mainWindow?.webContents.send('spy:done');
+        mainWindow?.setAlwaysOnTop(false);
+      });
+
+      const target = url && url !== 'about:blank' ? url : 'about:blank';
+      spyWindow.loadURL(target).catch(() => {});
+
+      // Float Studio so the locator field is visible while user picks elements
+      mainWindow?.setAlwaysOnTop(true, 'floating');
+      return true;
+    }
+
+    // ── Non-web modes: spawn a native OS process ──────────────────────────────
     let spyScript: string;
     let spyArgs: string[];
 
     if (mode === 'sap') {
       spyScript = path.join(electronDir, 'sap-spy.cjs');
       spyArgs   = [];
-    } else if (mode === 'desktop' || mode === 'mobile') {
+    } else if (mode === 'desktop') {
+      spyScript = path.join(electronDir, 'desktop-spy-native.cjs');
+      spyArgs   = [];
+      // Do NOT set always-on-top for desktop spy: Studio must NOT cover the
+      // target app. AXUIElementCopyElementAtPosition returns the frontmost
+      // element at the cursor position, so if Studio floated above the target
+      // app it would capture Studio's own elements instead of the target's.
+    } else {
+      // mobile
       spyScript = path.join(electronDir, 'desktop-spy.cjs');
       spyArgs   = [url || 'http://localhost:4723', mode];
-    } else {
-      spyScript = path.join(electronDir, 'spy.cjs');
-      spyArgs   = [url || 'about:blank'];
     }
+
+    const spyEnv: Record<string, string> = {
+      PATH:     process.env.PATH     ?? '',
+      HOME:     process.env.HOME     ?? '',
+      USER:     process.env.USER     ?? '',
+      TMPDIR:   process.env.TMPDIR   ?? '/tmp',
+      LANG:     process.env.LANG     ?? 'en_US.UTF-8',
+      NODE_PATH: nodeModules,
+    };
+    if (process.env.DISPLAY) spyEnv.DISPLAY = process.env.DISPLAY;
+    if (process.env.XDG_RUNTIME_DIR) spyEnv.XDG_RUNTIME_DIR = process.env.XDG_RUNTIME_DIR;
 
     spyProcess = spawn(NODE_BIN, [spyScript, ...spyArgs], {
       cwd: path.dirname(spyScript),
-      env: {
-        ...process.env,
-        NODE_PATH: nodeModules,
-      },
+      env: spyEnv,
     });
 
     spyProcess.stdout?.on('data', (data: Buffer) => {
@@ -482,10 +566,15 @@ window.__prabalaGetLocator = function(el) {
           const obj = JSON.parse(line);
           if (obj.__done) {
             mainWindow?.webContents.send('spy:done');
+            mainWindow?.setAlwaysOnTop(false);
           } else if (obj.__error) {
             mainWindow?.webContents.send('spy:error', obj.__error);
+            mainWindow?.setAlwaysOnTop(false);
+          } else if (obj.__hover) {
+            mainWindow?.webContents.send('spy:hover', obj);
           } else {
-            mainWindow?.webContents.send('spy:locator', obj); // { locator, tag, text }
+            mainWindow?.webContents.send('spy:locator', obj);
+            mainWindow?.setAlwaysOnTop(false);
             setTimeout(() => {
               if (spyProcess) { killChild(spyProcess); spyProcess = null; }
             }, 300);
@@ -502,6 +591,7 @@ window.__prabalaGetLocator = function(el) {
 
     spyProcess.on('close', () => {
       mainWindow?.webContents.send('spy:done');
+      mainWindow?.setAlwaysOnTop(false);
       spyProcess = null;
     });
 
@@ -509,16 +599,55 @@ window.__prabalaGetLocator = function(el) {
   });
 
   ipcMain.handle('spy:stop', () => {
+    if (spyWindow && !spyWindow.isDestroyed()) { spyWindow.close(); spyWindow = null; }
     killChild(spyProcess);
     spyProcess = null;
+    mainWindow?.setAlwaysOnTop(false);
     return true;
   });
 
   // ── Desktop Recorder ─────────────────────────────────────────────────────────
   let desktopRecorderProcess: ReturnType<typeof spawn> | null = null;
 
+  // Expose a lightweight permission check so the renderer can query before starting
+  ipcMain.handle('desktopRecorder:checkPermission', () => {
+    if (process.platform !== 'darwin') return true; // Windows doesn't need this
+    return systemPreferences.isTrustedAccessibilityClient(false);
+  });
+
+  ipcMain.handle('desktopRecorder:requestPermission', () => {
+    if (process.platform !== 'darwin') return true;
+    // Passing true opens System Settings → Accessibility and prompts the user
+    return systemPreferences.isTrustedAccessibilityClient(true);
+  });
+
   ipcMain.handle('desktopRecorder:start', (_e, appPath: string, appiumUrl?: string) => {
     try {
+      // ── macOS: pre-flight accessibility check ────────────────────────────
+      // If the Electron app itself doesn't have accessibility trust we send a
+      // clear error and open System Settings so the user can grant it.
+      // Note: even when Electron is trusted, the spawned osascript subprocess
+      // needs its OWN entry — the error message in the recorder guides users.
+      if (process.platform === 'darwin') {
+        const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+        if (!trusted) {
+          // Prompt: opens System Settings → Privacy & Security → Accessibility
+          systemPreferences.isTrustedAccessibilityClient(true);
+          mainWindow?.webContents.send(
+            'desktopRecorder:error',
+            'Accessibility permission required.\n\n' +
+            'System Settings has been opened for you:\n' +
+            '  Privacy & Security → Accessibility\n\n' +
+            'Add both:\n' +
+            '  • Prabala  (or "Electron" in dev mode)\n' +
+            '  • osascript  (/usr/bin/osascript)\n\n' +
+            'Then click "Desktop Record" again.'
+          );
+          mainWindow?.webContents.send('desktopRecorder:done');
+          return false;
+        }
+      }
+
       if (desktopRecorderProcess) { killChild(desktopRecorderProcess); desktopRecorderProcess = null; }
 
       const electronDir = isDev
@@ -526,6 +655,10 @@ window.__prabalaGetLocator = function(el) {
         : __dirname;
       const nodeModules = path.join(__dirname, '..', '..', 'node_modules');
       const script = path.join(electronDir, 'desktop-recorder.cjs');
+
+      // Float the Studio window so the recording banner stays visible while
+      // the user interacts with the target app.
+      mainWindow?.setAlwaysOnTop(true, 'floating');
 
       desktopRecorderProcess = spawn(NODE_BIN, [script, appPath || '', appiumUrl || 'http://localhost:4723'], {
         cwd: path.dirname(script),
@@ -551,6 +684,9 @@ window.__prabalaGetLocator = function(el) {
               mainWindow?.webContents.send('desktopRecorder:error', obj.__error);
             } else if (obj.__screenshot) {
               mainWindow?.webContents.send('desktopRecorder:screenshot', obj);
+            } else if (obj.__axFallback) {
+              // Recorder is operating without element-name resolution
+              mainWindow?.webContents.send('desktopRecorder:axFallback', obj.message ?? '');
             } else {
               mainWindow?.webContents.send('desktopRecorder:step', obj);
             }
@@ -562,7 +698,8 @@ window.__prabalaGetLocator = function(el) {
         console.log('[Desktop Recorder]', data.toString().trim());
       });
 
-      desktopRecorderProcess.on('close', (code) => {
+      desktopRecorderProcess.on('close', () => {
+        mainWindow?.setAlwaysOnTop(false);
         mainWindow?.webContents.send('desktopRecorder:done');
         desktopRecorderProcess = null;
       });
@@ -578,6 +715,7 @@ window.__prabalaGetLocator = function(el) {
   ipcMain.handle('desktopRecorder:stop', () => {
     killChild(desktopRecorderProcess);
     desktopRecorderProcess = null;
+    mainWindow?.setAlwaysOnTop(false);
     return true;
   });
 

@@ -1,0 +1,13 @@
+testCase: Test33
+steps:
+  - keyword: Web.Launch
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/dashboard
+  - keyword: NavigateTo
+    params:
+      url: https://cognitest-atbvhnhshhgnf5ed.eastus-01.azurewebsites.net/login
+  - keyword: Web.Close

@@ -109,7 +109,7 @@ export default function ExecutionMonitorPage() {
       ...(headless ? ['--headless'] : []),
     ]
 
-    appendLog({ ts: Date.now(), type: 'system', text: `▶ Pattern : ${pattern}\n▶ Browser : ${browser}${headless ? ' (headless)' : ''}\n\n` })
+    appendLog({ ts: Date.now(), type: 'system', text: `▶ Pattern : ${pattern}\n${allDesktop ? '▶ Mode    : Desktop (native display required)\n' : `▶ Browser : ${browser}${headless ? ' (headless)' : ''}\n`}\n` })
 
     ipc.runner.removeAllListeners()
     ipc.runner.onStdout((line: string) => appendLog({ ts: Date.now(), type: 'stdout', text: line }))
@@ -130,6 +130,16 @@ export default function ExecutionMonitorPage() {
     setRunStatus('idle')
     appendLog({ ts: Date.now(), type: 'system', text: '\n⏹ Run stopped by user\n' })
   }
+
+  // ── Detect test types from selected cases ─────────────────────────────────
+  const selectedCases = testCases.filter(tc => selected.has(tc.filePath))
+  const hasDesktopTests = selectedCases.some(tc =>
+    tc.steps.some(s => s.keyword.startsWith('Desktop.'))
+  )
+  const hasWebTests = selectedCases.some(tc =>
+    tc.steps.some(s => !s.keyword.startsWith('Desktop.') && !s.keyword.startsWith('SAP.'))
+  )
+  const allDesktop = hasDesktopTests && !hasWebTests
 
   // ── Derived display ────────────────────────────────────────────────────────
   const duration = run.startedAt && run.finishedAt
@@ -170,27 +180,51 @@ export default function ExecutionMonitorPage() {
 
         {/* Options */}
         <div className="flex-shrink-0 border-t border-surface-500 px-4 py-3 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-slate-400">Browser</label>
-            <select
-              className="input text-xs w-28 py-1"
-              value={browser}
-              onChange={e => setBrowser(e.target.value)}
-            >
-              <option value="chromium">Chromium</option>
-              <option value="firefox">Firefox</option>
-              <option value="webkit">WebKit</option>
-            </select>
-          </div>
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-xs text-slate-400">Headless mode</span>
-            <input
-              type="checkbox"
-              checked={headless}
-              onChange={e => setHeadless(e.target.checked)}
-              className="accent-brand-500 w-3.5 h-3.5"
-            />
-          </label>
+
+          {/* Desktop-only notice */}
+          {allDesktop && (
+            <p className="text-xs text-amber-400/80 leading-snug">
+              Desktop tests run against native apps — browser and headless settings do not apply.
+              A visible display session is required.
+            </p>
+          )}
+
+          {/* Mixed notice */}
+          {hasDesktopTests && hasWebTests && (
+            <p className="text-xs text-amber-400/80 leading-snug">
+              Mixed selection: browser settings apply to web steps only. Desktop steps always require a visible display.
+            </p>
+          )}
+
+          {/* Browser — hide when all-desktop */}
+          {!allDesktop && (
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-slate-400">Browser</label>
+              <select
+                className="input text-xs w-28 py-1"
+                value={browser}
+                onChange={e => setBrowser(e.target.value)}
+              >
+                <option value="chromium">Chromium</option>
+                <option value="firefox">Firefox</option>
+                <option value="webkit">WebKit</option>
+              </select>
+            </div>
+          )}
+
+          {/* Headless — hide when all-desktop */}
+          {!allDesktop && (
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-xs text-slate-400">Headless mode</span>
+              <input
+                type="checkbox"
+                checked={headless}
+                onChange={e => setHeadless(e.target.checked)}
+                className="accent-brand-500 w-3.5 h-3.5"
+              />
+            </label>
+          )}
+
           <div className="flex items-center justify-between">
             <label className="text-xs text-slate-400">Screenshots</label>
             <select

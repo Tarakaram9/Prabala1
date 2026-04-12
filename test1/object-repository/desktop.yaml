@@ -1,0 +1,73 @@
+objects:
+  password:
+    strategy: name
+    locator: Password
+    description: Password
+  username:
+    strategy: name
+    locator: Username
+    description: Username
+  login:
+    strategy: name
+    locator: Login
+    description: Login
+  content-area:
+    strategy: name
+    locator: Content Area
+    description: Content Area
+  add-task:
+    strategy: name
+    locator: Add Task
+    description: Add Task
+  task-title:
+    strategy: name
+    locator: Task Title
+    description: Task Title
+  due-date:
+    strategy: name
+    locator: Due Date
+    description: Due Date
+  task-priority:
+    strategy: name
+    locator: Task Priority
+    description: Task Priority
+  save-task:
+    strategy: name
+    locator: Save Task
+    description: Save Task
+  tasks-view:
+    strategy: name
+    locator: Tasks View
+    description: Tasks View
+  path:
+    strategy: role
+    locator: path
+    description: path
+  svg:
+    strategy: role
+    locator: svg
+    description: svg
+  logout:
+    strategy: name
+    locator: Logout
+    description: Logout
+  contacts-tab:
+    strategy: name
+    locator: Contacts Tab
+    description: Contacts Tab
+  add-contact:
+    strategy: name
+    locator: Add Contact
+    description: Add Contact
+  contact-name:
+    strategy: name
+    locator: Contact Name
+    description: Contact Name
+  contact-email:
+    strategy: name
+    locator: Contact Email
+    description: Contact Email
+  save-contact:
+    strategy: name
+    locator: Save Contact
+    description: Save Contact

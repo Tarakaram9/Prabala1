@@ -1,0 +1,58 @@
+testCase: D1
+steps:
+  - keyword: Desktop.LaunchApp
+    params:
+      appPath: /Users/ram/prabala/desktop-demo-app/dist/mac/PrabalaTaskManager.app
+      platform: mac
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Username
+      value: admin
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Password
+      value: admin123
+  - keyword: Desktop.Click
+    params:
+      locator: name=Login
+  - keyword: Desktop.Click
+    params:
+      locator: name=Add Task
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Task Title
+      value: tarak
+  - keyword: Desktop.Click
+    params:
+      locator: name=Task Priority
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Task Priority
+      value: high
+  - keyword: Desktop.Click
+    params:
+      locator: name=Due Date
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Due Date
+      value: '2026-04-12'
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Task
+  - keyword: Desktop.Click
+    params:
+      locator: name=Contacts Tab
+  - keyword: Desktop.Click
+    params:
+      locator: name=Add Contact
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Contact Name
+      value: Test
+  - keyword: Desktop.EnterText
+    params:
+      locator: name=Contact Email
+      value: Tet@gmil.com
+  - keyword: Desktop.Click
+    params:
+      locator: name=Save Contact

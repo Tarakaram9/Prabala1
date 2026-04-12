@@ -5,7 +5,7 @@
 //   macOS   — osascript / JXA  (JavaScript for Automation, built into every Mac)
 //   Windows — PowerShell + UIAutomationClient COM  (built into every Windows)
 //
-// Args:  <appPath> [unused]
+// Args:  <appPath>
 //   appPath   Path to .app / .exe to launch, OR bundle ID / exe name to attach.
 //             Pass empty string "" to attach to the frontmost/active window.
 //
@@ -13,6 +13,7 @@
 //   { "keyword": "Desktop.Click",     "params": { "locator": "name=Login" } }
 //   { "keyword": "Desktop.EnterText", "params": { "locator": "name=Username", "value": "admin" } }
 //   { "__screenshot": "<base64 png>", "__screenshotType": "png", "width": N, "height": N }
+//   { "__axFallback": true, "message": "..." }   ← recording without element names
 //   { "__done": true }
 //   { "__error": "<message>" }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -22,6 +23,9 @@ const { spawn, execSync, execFileSync } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
+const net  = require('net');
+const http = require('http');
+const crypto = require('crypto');
 
 const appArg = (process.argv[2] || '').trim();
 const isMac  = process.platform === 'darwin';
@@ -31,196 +35,92 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-// ── Locator helpers ───────────────────────────────────────────────────────────
-
-function bestLocatorFromAttrs(attrs) {
-  // Priority: AXIdentifier > AXTitle/AXDescription/AXValue (trimmed, short) > role+index
-  const id  = attrs.AXIdentifier || attrs.AutomationId;
-  if (id  && id.trim())  return `id=${id.trim()}`;
-  const lbl = attrs.AXTitle || attrs.AXDescription || attrs.name || attrs.label;
-  if (lbl && lbl.trim() && lbl.trim().length < 60) return `name=${lbl.trim()}`;
-  const val = attrs.AXValue || attrs.value;
-  if (val && val.trim() && val.trim().length < 60) return `value=${val.trim()}`;
-  const role = attrs.AXRole || attrs.ControlType || attrs.role || 'Element';
-  return `role=${role}`;
-}
-
 // ── Screenshot ────────────────────────────────────────────────────────────────
 
 let lastScreenshotHash = '';
 const SCREENSHOT_INTERVAL_MS = 600;
 
-async function captureScreenshot() {
-  try {
+// Non-blocking: runs screencapture/PowerShell asynchronously so the Node event
+// loop is never stalled while waiting for the OS screenshot tool to finish.
+let _screenshotInFlight = false;
+function captureScreenshot() {
+  if (_screenshotInFlight) return Promise.resolve();
+  _screenshotInFlight = true;
+  return new Promise((resolve) => {
     const tmp = path.join(os.tmpdir(), `prabala-screen-${Date.now()}.png`);
+    let proc;
     if (isMac) {
-      execFileSync('screencapture', ['-x', '-t', 'png', tmp], { stdio: 'ignore' });
+      proc = spawn('screencapture', ['-x', '-t', 'png', tmp], { stdio: 'ignore' });
     } else if (isWin) {
-      // PowerShell one-liner: capture screen to PNG
       const ps = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bmp=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $b=New-Object System.Drawing.Bitmap($bmp.Width,$bmp.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$bmp.Size); $b.Save('${tmp.replace(/\\/g,'\\\\')}',[System.Drawing.Imaging.ImageFormat]::Png)`;
-      execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' });
+      proc = spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' });
     } else {
-      return; // unsupported platform
+      _screenshotInFlight = false;
+      return resolve();
     }
-    if (!fs.existsSync(tmp)) return;
-    const data = fs.readFileSync(tmp).toString('base64');
-    fs.unlinkSync(tmp);
-    if (data === lastScreenshotHash) return;
-    lastScreenshotHash = data;
-    emit({ __screenshot: data, __screenshotType: 'png', width: 1280, height: 800 });
-  } catch { /* screenshot is best-effort */ }
+    proc.on('close', () => {
+      _screenshotInFlight = false;
+      try {
+        if (!fs.existsSync(tmp)) return resolve();
+        const data = fs.readFileSync(tmp).toString('base64');
+        fs.unlinkSync(tmp);
+        if (data === lastScreenshotHash) return resolve();
+        lastScreenshotHash = data;
+        emit({ __screenshot: data, __screenshotType: 'png', width: 1280, height: 800 });
+      } catch { /* screenshot is best-effort */ }
+      resolve();
+    });
+    proc.on('error', () => { _screenshotInFlight = false; resolve(); });
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // macOS — JXA via osascript
 // ═════════════════════════════════════════════════════════════════════════════
 
-// JXA script that dumps the AX tree of the target app as JSON.
-// We run this via: osascript -l JavaScript -e "<script>" <appName>
-const JXA_DUMP = `
-ObjC.import('AppKit');
-ObjC.import('Cocoa');
+// JXA monitor script — key improvements over old version:
+//  1. Probes AX permission at startup and emits __axFallback if denied
+//  2. Falls back to position=x,y locators when AX is unavailable
+//  3. Polls at 50 ms (was 150 ms) so clicks < 100 ms are reliably caught
+//  4. Checks AX return codes on each call — switches to fallback if revoked mid-session
+//  5. Text detection: only emits when value stabilises (debounce via prev/lastEmitted comparison)
+//  6. Uses ObjC.unwrap() on NSPoint members to ensure plain JS numbers
 
-var args = $.NSProcessInfo.processInfo.arguments;
-var targetName = (args.count > 4) ? ObjC.unwrap(args.objectAtIndex(4)) : '';
-
-function axDump(el, depth) {
-  if (depth > 6) return null;
-  var role, title, value, id, focused, enabled;
-  try { role    = ObjC.unwrap(el.AXRole) || ''; } catch(e) { role = ''; }
-  try { title   = ObjC.unwrap(el.AXTitle) || ObjC.unwrap(el.AXDescription) || ''; } catch(e) { title = ''; }
-  try { value   = ObjC.unwrap(el.AXValue); if (typeof value !== 'string') value = ''; } catch(e) { value = ''; }
-  try { id      = ObjC.unwrap(el.AXIdentifier) || ''; } catch(e) { id = ''; }
-  try { focused = el.AXFocused == true; } catch(e) { focused = false; }
-  try { enabled = el.AXEnabled != false; } catch(e) { enabled = true; }
-
-  var node = { role: role, title: title, value: value, id: id, focused: focused, enabled: enabled, children: [] };
-
-  var children;
-  try { children = ObjC.unwrap(el.AXChildren) || []; } catch(e) { children = []; }
-  for (var i = 0; i < children.length && i < 80; i++) {
-    var child = axDump(children[i], depth + 1);
-    if (child) node.children.push(child);
-  }
-  return node;
-}
-
-function getApp() {
-  var wsApps = ObjC.unwrap($.NSWorkspace.sharedWorkspace.runningApplications);
-  if (!targetName) {
-    // Frontmost app
-    var front = $.NSWorkspace.sharedWorkspace.frontmostApplication;
-    return Application(ObjC.unwrap(front.localizedName));
-  }
-  for (var i = 0; i < wsApps.length; i++) {
-    var a = wsApps[i];
-    var name = ObjC.unwrap(a.localizedName) || '';
-    var bid  = ObjC.unwrap(a.bundleIdentifier) || '';
-    if (name.toLowerCase() === targetName.toLowerCase() || bid.toLowerCase() === targetName.toLowerCase()) {
-      return Application(name);
-    }
-  }
-  return null;
-}
-
-var app = getApp();
-if (!app) { JSON.stringify({ error: 'App not found: ' + targetName }); }
-else {
-  try {
-    var axApp = app.windows[0];
-    var result = [];
-    var wins = app.windows();
-    for (var w = 0; w < wins.length && w < 3; w++) {
-      // Use System Events for AX tree
-    }
-    // Use System Events AX
-    var se = Application('System Events');
-    var proc = se.processes.whose({ name: app.name() })[0];
-    var tree = axDump(proc, 0);
-    JSON.stringify(tree);
-  } catch(e) {
-    JSON.stringify({ error: String(e) });
-  }
-}
-`.trim();
-
-// Simpler, faster JXA that uses System Events directly
-const JXA_AX = `
-ObjC.import('AppKit');
-var targetName = $.NSProcessInfo.processInfo.arguments.count > 4
-  ? ObjC.unwrap($.NSProcessInfo.processInfo.arguments.objectAtIndex(4)) : '';
-
-function flatten(el, depth, out) {
-  if (!el || depth > 7) return;
-  var role='', title='', val='', axid='', focused=false;
-  try { role  = ObjC.unwrap(el.role()) || ''; }    catch(e){}
-  try { title = ObjC.unwrap(el.title()) || ObjC.unwrap(el.description()) || ''; } catch(e){}
-  try { var v = el.value(); val = (typeof v === 'string') ? v : (v != null ? String(v) : ''); } catch(e){}
-  try { focused = el.focused() === true; } catch(e){}
-  if (role) out.push({ role, title, val, focused });
-  try {
-    var kids = el.uiElements();
-    for (var i=0; i<kids.length && i<60; i++) flatten(kids[i], depth+1, out);
-  } catch(e){}
-}
-
-var se = Application('System Events');
-var proc;
-if (targetName) {
-  try { proc = se.processes.whose({name: targetName})[0]; } catch(e){}
-  if (!proc) {
-    var allNames = se.processes().map(function(p){ try{return p.name();}catch(e){return '';} });
-    for (var i=0; i<allNames.length; i++) {
-      if (allNames[i].toLowerCase().indexOf(targetName.toLowerCase()) >= 0) {
-        proc = se.processes[i]; break;
-      }
-    }
-  }
-} else {
-  // frontmost
-  var front = $.NSWorkspace.sharedWorkspace.frontmostApplication;
-  var fname = ObjC.unwrap(front.localizedName);
-  try { proc = se.processes.whose({name: fname})[0]; } catch(e){}
-}
-if (!proc) { JSON.stringify({error: 'Process not found'}); }
-else {
-  var nodes = [];
-  flatten(proc, 0, nodes);
-  JSON.stringify(nodes);
-}
-`.trim();
-
-function runJxa(script, extra) {
-  const args = ['-l', 'JavaScript', '-e', script];
-  if (extra) args.push(extra);
-  const out = execFileSync('osascript', args, { encoding: 'utf8', timeout: 8000 });
-  return JSON.parse(out.trim() || 'null');
-}
-
-// ── macOS: JXA monitor script (synchronous polling loop) ─────────────────────
-// Polls every 150 ms using NSThread.sleepForTimeInterval (works reliably in
-// osascript context — no NSRunLoop/NSTimer/addGlobalMonitor required).
-// Detects clicks via NSEvent.pressedMouseButtons + AXUIElementCopyElementAtPosition.
-// Detects text-field changes via AXFocusedUIElement value tracking.
 const JXA_MONITOR = `
 ObjC.import('AppKit');
 ObjC.import('ApplicationServices');
-
-// ── args ───────────────────────────────────────────────────────────────────
-var pargs = $.NSProcessInfo.processInfo.arguments;
-// argv: [osascript, -l, JavaScript, scriptPath, targetName?]
-var targetName = pargs.count > 4 ? ObjC.unwrap(pargs.objectAtIndex(4)) : '';
 
 // ── stdout helper ──────────────────────────────────────────────────────────
 var stdout = $.NSFileHandle.fileHandleWithStandardOutput;
 function emitLine(obj) {
   try {
-    stdout.writeData($(JSON.stringify(obj) + '\\n').dataUsingEncoding(4));
+    var data = $(JSON.stringify(obj) + '\\n').dataUsingEncoding($.NSUTF8StringEncoding);
+    stdout.writeData(data);
   } catch(e) {}
 }
 
 // ── AX helpers ─────────────────────────────────────────────────────────────
 var sysWide = $.AXUIElementCreateSystemWide();
+
+// Probe AX permission.
+//   kAXErrorAPIDisabled = -25211  → not trusted (accessibility denied)
+//   kAXErrorNoValue     = -25300  → trusted but no focused element (normal)
+//   0                             → trusted and element found
+var _probeRef = Ref();
+var _probeErr = $.AXUIElementCopyAttributeValue(sysWide, $('AXFocusedUIElement'), _probeRef);
+var AX_AVAILABLE = (_probeErr !== -25211);
+
+if (!AX_AVAILABLE) {
+  emitLine({
+    __axFallback: true,
+    message: 'Accessibility permission not granted — recording in position mode (position=x,y locators).\\n' +
+             'To get named element locators:\\n' +
+             '  System Settings → Privacy & Security → Accessibility\\n' +
+             '  Add osascript   (for dev mode)\\n' +
+             '  OR add Prabala  (for packaged app)\\n' +
+             'Then restart the desktop recorder.'
+  });
+}
 
 function axAttr(el, attr) {
   try {
@@ -242,54 +142,113 @@ function locatorFor(el) {
 }
 
 // ── state ──────────────────────────────────────────────────────────────────
-var lastDown     = false;
-var prevTextKey  = '';
-var prevTextVal  = '';
-var screenH      = ObjC.unwrap($.NSScreen.mainScreen.frame).size.height;
-var TEXT_ROLES   = ['AXTextField','AXTextArea','AXComboBox','AXSearchField','AXSecureTextField'];
+var lastDown          = false;
+var prevTextKey       = '';
+var prevTextVal       = '';
+var lastEmittedTxtVal = '';
+// Pending text — accumulated while user types; emitted after TEXT_SETTLE ticks of no change.
+var pendingTextLoc    = '';
+var pendingTextVal    = '';
+var textSettleTicks   = 0;
+var TEXT_SETTLE       = 16;   // 16 × 50 ms = 800 ms stable before emitting
+var screenH           = ObjC.unwrap($.NSScreen.mainScreen.frame).size.height;
+var TEXT_ROLES        = ['AXTextField','AXTextArea','AXComboBox','AXSearchField','AXSecureTextField'];
 
 emitLine({ __ready: true });
 
-// ── main loop ──────────────────────────────────────────────────────────────
+// ── main loop — 50 ms tick ──────────────────────────────────────────────────
 while (true) {
-  $.NSThread.sleepForTimeInterval(0.15);
+  $.NSThread.sleepForTimeInterval(0.05);
 
-  // ── click detection ──────────────────────────────────────────────────
+  // ── click detection ────────────────────────────────────────────────────
   try {
-    var down = ($.NSEvent.pressedMouseButtons & 1) === 1;
+    var buttons = $.NSEvent.pressedMouseButtons;
+    var down    = (buttons & 1) === 1;
+
     if (down && !lastDown) {
-      var mLoc = $.NSEvent.mouseLocation;
-      // NSEvent y is from bottom-left; AX wants y from top-left → flip
-      var elRef = Ref();
-      if ($.AXUIElementCopyElementAtPosition(sysWide, mLoc.x, screenH - mLoc.y, elRef) === 0) {
-        emitLine({ keyword: 'Desktop.Click', params: { locator: locatorFor(elRef[0]) } });
+      // Capture mouse position at the exact moment of button-down
+      var mLoc   = $.NSEvent.mouseLocation;
+      var clickX = mLoc.x;
+      var clickY = screenH - mLoc.y;   // flip: NS bottom-left → AX top-left
+
+      var emittedClick = false;
+
+      if (AX_AVAILABLE) {
+        var elRef  = Ref();
+        var axErr  = $.AXUIElementCopyElementAtPosition(sysWide, clickX, clickY, elRef);
+
+        if (axErr === 0) {
+          emitLine({ keyword: 'Desktop.Click', params: { locator: locatorFor(elRef[0]) } });
+          emittedClick = true;
+        } else if (axErr === -25211) {
+          // Permission revoked mid-session — switch to fallback
+          AX_AVAILABLE = false;
+          emitLine({
+            __axFallback: true,
+            message: 'Accessibility permission was revoked — switching to position mode.'
+          });
+        }
+      }
+
+      // Fallback: emit position locator (always useful for screenshots)
+      if (!emittedClick) {
+        emitLine({
+          keyword: 'Desktop.Click',
+          params: { locator: 'position=' + Math.round(clickX) + ',' + Math.round(clickY) }
+        });
       }
     }
+
     lastDown = down;
   } catch(e) {}
 
-  // ── text-field value change detection ────────────────────────────────
-  try {
-    var focRef = Ref();
-    if ($.AXUIElementCopyAttributeValue(sysWide, $('AXFocusedUIElement'), focRef) === 0) {
-      var focEl  = focRef[0];
-      var role   = axAttr(focEl, 'AXRole');
-      if (TEXT_ROLES.indexOf(role) >= 0) {
-        var title  = axAttr(focEl, 'AXTitle') || axAttr(focEl, 'AXDescription') || '';
-        var curVal = axAttr(focEl, 'AXValue') || '';
-        var key    = role + ':' + title;
-        if (key !== prevTextKey) {
-          // newly focused field — reset baseline, do not emit
-          prevTextKey = key;
-          prevTextVal = curVal;
-        } else if (curVal !== prevTextVal && curVal.trim()) {
-          var loc = title ? 'name=' + title.trim() : 'role=' + role;
-          emitLine({ keyword: 'Desktop.EnterText', params: { locator: loc, value: curVal } });
-          prevTextVal = curVal;
+  // ── text-field value change detection (AX only) ────────────────────────
+  if (AX_AVAILABLE) {
+    try {
+      var focRef = Ref();
+      if ($.AXUIElementCopyAttributeValue(sysWide, $('AXFocusedUIElement'), focRef) === 0) {
+        var focEl  = focRef[0];
+        var role   = axAttr(focEl, 'AXRole');
+
+        if (TEXT_ROLES.indexOf(role) >= 0) {
+          var ftitle = axAttr(focEl, 'AXTitle') || axAttr(focEl, 'AXDescription') || '';
+          var curVal = axAttr(focEl, 'AXValue') || '';
+          var key    = role + ':' + ftitle;
+
+          if (key !== prevTextKey) {
+            // Focus moved away — flush any pending text for the old field
+            if (pendingTextVal && pendingTextVal !== lastEmittedTxtVal) {
+              emitLine({ keyword: 'Desktop.EnterText', params: { locator: pendingTextLoc, value: pendingTextVal } });
+              lastEmittedTxtVal = pendingTextVal;
+            }
+            prevTextKey       = key;
+            prevTextVal       = curVal;
+            lastEmittedTxtVal = curVal;
+            pendingTextLoc    = '';
+            pendingTextVal    = '';
+            textSettleTicks   = 0;
+          } else if (curVal !== prevTextVal) {
+            // Value changed — accumulate, reset settle counter
+            prevTextVal = curVal;
+            if (curVal) {
+              pendingTextLoc  = ftitle ? 'name=' + ftitle.trim() : 'role=' + role;
+              pendingTextVal  = curVal;
+              textSettleTicks = 0;
+            }
+          } else if (pendingTextVal) {
+            // Value stable — count up towards emit
+            textSettleTicks++;
+            if (textSettleTicks >= TEXT_SETTLE && pendingTextVal !== lastEmittedTxtVal) {
+              emitLine({ keyword: 'Desktop.EnterText', params: { locator: pendingTextLoc, value: pendingTextVal } });
+              lastEmittedTxtVal = pendingTextVal;
+              pendingTextVal    = '';
+              textSettleTicks   = 0;
+            }
+          }
         }
       }
-    }
-  } catch(e) {}
+    } catch(e) {}
+  }
 }
 `.trim();
 
@@ -297,82 +256,29 @@ while (true) {
 
 function macLaunchApp(appPath) {
   if (appPath.endsWith('.app')) {
-    execFileSync('open', ['-a', appPath], { stdio: 'ignore' });
-    // Wait up to 3s for it to appear
-    for (let i = 0; i < 6; i++) {
-      execSync('sleep 0.5');
-    }
+    const args = path.isAbsolute(appPath) ? [appPath] : ['-a', appPath];
+    execFileSync('open', args, { stdio: 'ignore' });
+    for (let i = 0; i < 6; i++) execSync('sleep 0.5');
     return path.basename(appPath, '.app');
   }
-  // Already a name/bundle id
+  execFileSync('open', ['-a', appPath], { stdio: 'ignore' });
+  for (let i = 0; i < 6; i++) execSync('sleep 0.5');
   return appPath;
-}
-
-// ── macOS diff+record loop ────────────────────────────────────────────────────
-
-function macNodeKey(n) {
-  if (n.title && n.title.length < 60) return `${n.role}:${n.title}`;
-  if (n.val   && n.val.length   < 60) return `${n.role}:val:${n.val}`;
-  return `${n.role}`;
-}
-
-function macLocator(n) {
-  if (n.title && n.title.trim()) return `name=${n.title.trim()}`;
-  if (n.val   && n.val.trim())   return `value=${n.val.trim()}`;
-  return `role=${n.role}`;
-}
-
-const TEXT_ROLES_MAC = new Set(['AXTextField', 'AXTextArea', 'AXComboBox', 'AXSearchField']);
-
-let prevMacNodes = null;
-let prevMacFocused = null;
-
-function diffMacNodes(curr) {
-  if (!prevMacNodes) { prevMacNodes = curr; return []; }
-
-  const prevMap = new Map();
-  prevMacNodes.forEach(n => prevMap.set(macNodeKey(n), n));
-  const currMap = new Map();
-  curr.forEach(n => currMap.set(macNodeKey(n), n));
-
-  const steps = [];
-
-  // Focused element changed → Click (unless text input)
-  const currFocused = curr.find(n => n.focused);
-  const prevFocused = prevMacNodes.find(n => n.focused);
-  const currFocKey  = currFocused ? macNodeKey(currFocused) : null;
-  const prevFocKey  = prevFocused ? macNodeKey(prevFocused) : null;
-
-  if (currFocKey && currFocKey !== prevFocKey) {
-    if (!TEXT_ROLES_MAC.has(currFocused.role)) {
-      steps.push({ keyword: 'Desktop.Click', params: { locator: macLocator(currFocused) } });
-    }
-    prevMacFocused = currFocKey;
-  }
-
-  // Value changed on a text input → EnterText
-  for (const [key, cn] of currMap) {
-    const pn = prevMap.get(key);
-    if (!pn) continue;
-    if (TEXT_ROLES_MAC.has(cn.role) && cn.val !== pn.val && cn.val.trim()) {
-      steps.push({ keyword: 'Desktop.EnterText', params: { locator: macLocator(cn), value: cn.val } });
-    }
-  }
-
-  prevMacNodes = curr;
-  return steps;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Windows — PowerShell UIAutomation
 // ═════════════════════════════════════════════════════════════════════════════
 
-const PS_DUMP = `
+function buildPsDump(targetName) {
+  const safe = (targetName || '').replace(/'/g, "''");
+  return `
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$ae = [System.Windows.Automation.AutomationElement]
+$ae   = [System.Windows.Automation.AutomationElement]
 $root = $ae::RootElement
-$targetName = $args[0]
+$targetName = '${safe}'
+
 function Flatten($el, $depth) {
   if ($depth -gt 6) { return }
   $props = $el.GetCurrentPropertyValue($ae::NameProperty)
@@ -380,35 +286,97 @@ function Flatten($el, $depth) {
   $aid   = $el.GetCurrentPropertyValue($ae::AutomationIdProperty)
   $val   = ''
   try {
-    $vp = [System.Windows.Automation.ValuePattern]
+    $vp   = [System.Windows.Automation.ValuePattern]
     $vobj = $el.GetCurrentPattern($vp::Pattern)
-    $val = $vobj.Current.Value
+    $val  = $vobj.Current.Value
   } catch {}
   $focused = $el.GetCurrentPropertyValue($ae::HasKeyboardFocusProperty)
   [PSCustomObject]@{ role=$role; name=$props; val=$val; id=$aid; focused=$focused }
-  $cond = [System.Windows.Automation.Condition]::TrueCondition
+  $cond     = [System.Windows.Automation.Condition]::TrueCondition
   $children = $el.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
   foreach ($c in $children) { Flatten $c ($depth+1) }
 }
+
 if ($targetName) {
-  $cond = New-Object System.Windows.Automation.PropertyCondition($ae::NameProperty, $targetName)
-  $win  = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
+  $win = $null
+  try {
+    $pids = @(Get-Process | Where-Object { $_.Name -like "*$targetName*" } | Select-Object -ExpandProperty Id)
+    if ($pids.Count -gt 0) {
+      $allWins = $root.FindAll([System.Windows.Automation.TreeScope]::Children,
+                               [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($w in $allWins) {
+        $wPid = [int]$w.GetCurrentPropertyValue($ae::ProcessIdProperty)
+        if ($pids -contains $wPid) { $win = $w; break }
+      }
+    }
+  } catch {}
+  if (-not $win) {
+    $titleCond = New-Object System.Windows.Automation.PropertyCondition($ae::NameProperty, $targetName)
+    $win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $titleCond)
+  }
   if (-not $win) { Write-Output '[]'; exit }
   @(Flatten $win 0) | ConvertTo-Json -Compress
 } else {
   $fw = [System.Windows.Automation.AutomationElement]::FocusedElement
   if (-not $fw) { Write-Output '[]'; exit }
   $proc = $fw
-  while ($proc.CachedParent -and $proc.CachedParent -ne $root) { $proc = $proc.CachedParent }
+  while ($proc -and $proc.CachedParent -and $proc.CachedParent -ne $root) {
+    $proc = $proc.CachedParent
+  }
+  if (-not $proc) { Write-Output '[]'; exit }
   @(Flatten $proc 0) | ConvertTo-Json -Compress
+}`.trim();
 }
-`;
 
-function runPs(script, extra) {
-  const args = ['-NoProfile', '-Command', script];
-  if (extra) args.push(extra);
-  const out = execFileSync('powershell', args, { encoding: 'utf8', timeout: 8000 });
-  return JSON.parse(out.trim() || '[]');
+// ── Persistent PowerShell host ───────────────────────────────────────────────
+// A single PS process stays alive for the lifetime of the recorder.
+// Each poll sends the dump script delimited by __PRABALA_END__ so we never
+// pay the ~500-2000 ms process-startup cost on every tick.
+let _psProc = null;
+let _psRxBuf = '';
+let _psPendingResolve = null;
+
+function getPsProc() {
+  if (_psProc && !_psProc.killed) return _psProc;
+  _psProc = spawn('powershell', ['-NoProfile', '-NoExit', '-Command', '-'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  _psRxBuf = '';
+  _psProc.stdout.on('data', (chunk) => {
+    _psRxBuf += chunk.toString('utf8');
+    const idx = _psRxBuf.indexOf('__PRABALA_END__');
+    if (idx !== -1 && _psPendingResolve) {
+      const jsonPart = _psRxBuf.slice(0, idx).trim();
+      _psRxBuf = _psRxBuf.slice(idx + '__PRABALA_END__'.length);
+      const resolve = _psPendingResolve;
+      _psPendingResolve = null;
+      try { resolve(JSON.parse(jsonPart || '[]')); } catch { resolve([]); }
+    }
+  });
+  _psProc.on('close', () => { _psProc = null; if (_psPendingResolve) { _psPendingResolve([]); _psPendingResolve = null; } });
+  _psProc.on('error', () => { if (_psPendingResolve) { _psPendingResolve([]); _psPendingResolve = null; } });
+  return _psProc;
+}
+
+function runPs(script) {
+  return new Promise((resolve) => {
+    if (_psPendingResolve) { resolve([]); return; } // previous poll still running
+    _psPendingResolve = resolve;
+    const ps = getPsProc();
+    // Wrap script so we can detect the response boundary
+    ps.stdin.write(`${script}\nWrite-Output '__PRABALA_END__'\n`);
+    // Safety timeout — resolve with empty array if PS hangs
+    setTimeout(() => {
+      if (_psPendingResolve === resolve) { _psPendingResolve = null; resolve([]); }
+    }, 3000);
+  });
+}
+
+function stopPsProc() {
+  if (_psProc && !_psProc.killed) {
+    try { _psProc.stdin.end(); _psProc.kill(); } catch { /* ignore */ }
+  }
+  _psProc = null;
 }
 
 function winLaunchApp(appPath) {
@@ -464,9 +432,17 @@ function diffWinNodes(curr) {
 // CDP recorder — for Electron apps
 // ═════════════════════════════════════════════════════════════════════════════
 
-const http = require('http');
-const net  = require('net');
-const crypto = require('crypto');
+/** Fast TCP probe — checks if a port is open without doing any HTTP.
+ *  Returns true within ~200 ms if open, false immediately on ECONNREFUSED. */
+function isPortOpen(port) {
+  return new Promise((resolve) => {
+    const sock = net.createConnection({ host: '127.0.0.1', port });
+    sock.setTimeout(200);
+    sock.on('connect', () => { sock.destroy(); resolve(true); });
+    sock.on('error',   () => resolve(false));
+    sock.on('timeout', () => { sock.destroy(); resolve(false); });
+  });
+}
 
 /** Poll CDP /json until a page target appears, or return null on timeout. */
 function detectCdp(port, timeoutMs) {
@@ -493,18 +469,8 @@ function detectCdp(port, timeoutMs) {
   });
 }
 
-/** Map an element's attributes to the best Prabala locator (name= preferred). */
-function cdpBestLocator(el) {
-  if (el.ariaLabel)      return `name=${el.ariaLabel}`;
-  if (el.id && !/^\d/.test(el.id)) return `id=${el.id}`;
-  if (el.placeholder)   return `name=${el.placeholder}`;
-  if (el.name && el.tag === 'button') return `name=${el.name}`;
-  if (el.textContent)   return `name=${el.textContent}`;
-  return `role=${el.role || 'Element'}`;
-}
-
-/** Send one CDP command over a WebSocket and return the result. */
-function cdpSend(sock, send, id, method, params) {
+/** Send one CDP command over a WebSocket. */
+function cdpSend(_sock, send, id, method, params) {
   send(JSON.stringify({ id, method, params }));
 }
 
@@ -539,13 +505,12 @@ async function runCdpRecorder(wsUrl) {
         if (plen === 126) { if (buf.length < 4) break; plen = (buf[2] << 8) | buf[3]; off = 4; }
         else if (plen === 127) { if (buf.length < 10) break; plen = buf.readUInt32BE(6); off = 10; }
         if (buf.length < off + plen) break;
-        frames.push(buf.slice(off, off + plen).toString('utf8'));
-        buf = buf.slice(off + plen);
+        frames.push(buf.subarray(off, off + plen).toString('utf8'));
+        buf = buf.subarray(off + plen);
       }
       return { frames, remaining: buf };
     }
 
-    // JS injected into the Electron page to capture clicks + text input
     const INJECT = `
 (function() {
   if (window.__prabalaRecActive) return;
@@ -561,13 +526,11 @@ async function runCdpRecorder(wsUrl) {
     return 'role=' + (el.getAttribute('role') || el.tagName.toLowerCase());
   }
 
-  // Click capture
   document.addEventListener('click', function(e) {
     var el = e.target;
     window.__prabalaEvent(JSON.stringify({ type:'click', locator: bestLocator(el) }));
   }, true);
 
-  // Text input capture (debounced 600ms after last keystroke)
   var inputTimers = new WeakMap();
   document.addEventListener('input', function(e) {
     var el = e.target;
@@ -578,7 +541,6 @@ async function runCdpRecorder(wsUrl) {
     }, 600));
   }, true);
 
-  // Select change
   document.addEventListener('change', function(e) {
     var el = e.target;
     if (el.tagName !== 'SELECT') return;
@@ -604,8 +566,7 @@ async function runCdpRecorder(wsUrl) {
         if (data.toString('utf8').includes('HTTP/1.1 101')) {
           upgraded = true;
           const hEnd = data.indexOf('\r\n\r\n');
-          if (hEnd !== -1) rxBuf = data.slice(hEnd + 4);
-          // Step 1: add a binding that the injected script can call
+          if (hEnd !== -1) rxBuf = data.subarray(hEnd + 4);
           cdpSend(sock, send, cmdId++, 'Runtime.addBinding', { name: '__prabalaEvent' });
         }
         return;
@@ -619,14 +580,12 @@ async function runCdpRecorder(wsUrl) {
         let msg;
         try { msg = JSON.parse(text); } catch { continue; }
 
-        // After addBinding ack, inject the recorder script
         if (msg.id === 1 && msg.result !== undefined) {
           cdpSend(sock, send, cmdId++, 'Runtime.evaluate', {
             expression: INJECT, returnByValue: true
           });
         }
 
-        // Runtime.bindingCalled carries our events
         if (msg.method === 'Runtime.bindingCalled' && msg.params && msg.params.name === '__prabalaEvent') {
           try {
             const ev = JSON.parse(msg.params.payload);
@@ -648,7 +607,6 @@ async function runCdpRecorder(wsUrl) {
       resolve();
     });
 
-    // Stop on process signal
     function cleanup() {
       try { sock.destroy(); } catch { /* ignore */ }
       resolve();
@@ -672,9 +630,9 @@ async function runCdpRecorder(wsUrl) {
 // Main
 // ═════════════════════════════════════════════════════════════════════════════
 
-const POLL_MS         = 400;
-const MAX_ERRORS      = 8;
-let polling = true;
+const POLL_MS    = 200;
+const MAX_ERRORS = 8;
+let polling  = true;
 let stopping = false;
 
 async function run() {
@@ -707,15 +665,23 @@ async function run() {
   // ── Initial screenshot ─────────────────────────────────────────────────────
   await captureScreenshot();
 
-  // ── macOS: try CDP first (Electron apps), fall back to JXA ──────────────────
+  // ── macOS: fast port probe → CDP (Electron apps) or JXA ──────────────────
   if (isMac) {
-    const cdpWsUrl = await detectCdp(9222, 3000);
+    // Fast TCP probe first — if port 9222 isn't even open skip CDP immediately
+    const portOpen = await isPortOpen(9222);
+    let cdpWsUrl = null;
+    if (portOpen) {
+      process.stderr.write(`[Desktop Recorder] Port 9222 open — probing for CDP\n`);
+      cdpWsUrl = await detectCdp(9222, 1500);
+    }
+
     if (cdpWsUrl) {
       process.stderr.write(`[Desktop Recorder] Electron app detected — using CDP recorder\n`);
       await runCdpRecorder(cdpWsUrl);
       return;
     }
 
+    // ── JXA AX monitor ────────────────────────────────────────────────────────
     const tmpScript = path.join(os.tmpdir(), `prabala-recorder-${Date.now()}.js`);
     fs.writeFileSync(tmpScript, JXA_MONITOR, 'utf8');
     process.stderr.write(`[Desktop Recorder] Spawning JXA event monitor\n`);
@@ -733,6 +699,7 @@ async function run() {
         if (!line.trim()) continue;
         try {
           const obj = JSON.parse(line);
+          // Forward everything except the internal __ready handshake
           if (!obj.__ready) emit(obj);
         } catch { /* ignore malformed */ }
       }
@@ -740,9 +707,25 @@ async function run() {
 
     monitorProc.stderr.on('data', (d) => {
       const msg = d.toString().trim();
+      if (!msg) return;
       process.stderr.write(`[JXA Monitor] ${msg}\n`);
-      if (msg.includes('not allowed assistive') || msg.includes('1003') || msg.includes('AXError')) {
-        emit({ __error: 'Accessibility permission denied.\nGo to System Settings → Privacy & Security → Accessibility\nand enable permission for Terminal / Electron / Prabala.' });
+      // Catch explicit AX/osascript error strings that land on stderr
+      if (
+        msg.includes('not allowed assistive') ||
+        msg.includes('1003') ||
+        msg.includes('AXError') ||
+        msg.includes('kAXError')
+      ) {
+        emit({
+          __error:
+            'Accessibility permission denied.\n' +
+            'To enable desktop recording:\n' +
+            '  System Settings → Privacy & Security → Accessibility\n' +
+            '  Click + and add:\n' +
+            '    • osascript  (dev mode — /usr/bin/osascript)\n' +
+            '    • Prabala    (packaged app)\n' +
+            'Then restart the desktop recorder.'
+        });
       }
     });
 
@@ -762,15 +745,17 @@ async function run() {
     process.on('SIGINT', cleanup);
     process.on('message', (msg) => { if (msg && msg.type === 'stop') cleanup(); });
 
-    await new Promise(resolve => monitorProc.on('close', resolve));
+    await new Promise(resolve => monitorProc.once('close', resolve));
     try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
     emit({ __done: true });
     process.exit(0);
-    return;
   }
 
-  // ── Windows: polling loop ────────────────────────────────────────────────────
-  let errorsInRow = 0;
+  // ── Windows: polling loop (persistent PS process) ────────────────────────
+  // Pre-warm the PowerShell host before the first poll to hide startup latency.
+  getPsProc();
+
+  let errorsInRow  = 0;
   let screenshotTick = 0;
 
   while (polling) {
@@ -778,7 +763,7 @@ async function run() {
     if (stopping) break;
 
     try {
-      const nodes = runPs(PS_DUMP, targetName || undefined);
+      const nodes = await runPs(buildPsDump(targetName));
       if (Array.isArray(nodes)) {
         const steps = diffWinNodes(nodes);
         for (const s of steps) emit(s);
@@ -799,6 +784,7 @@ async function run() {
     }
   }
 
+  stopPsProc();
   emit({ __done: true });
   process.exit(0);
 }
@@ -814,4 +800,3 @@ run().catch(err => {
   emit({ __done: true });
   process.exit(1);
 });
-

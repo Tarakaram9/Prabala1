@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld('prabala', {
     onLocator: (cb: (result: { locator: string; tag: string; text: string }) => void) => {
       ipcRenderer.on('spy:locator', (_e, result) => cb(result));
     },
+    onHover: (cb: (result: { locator: string; tag: string; text: string }) => void) => {
+      ipcRenderer.on('spy:hover', (_e, result) => cb(result));
+    },
     onError: (cb: (message: string) => void) => {
       ipcRenderer.on('spy:error', (_e, message) => cb(String(message)));
     },
@@ -96,6 +99,7 @@ contextBridge.exposeInMainWorld('prabala', {
     },
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('spy:locator');
+      ipcRenderer.removeAllListeners('spy:hover');
       ipcRenderer.removeAllListeners('spy:done');
       ipcRenderer.removeAllListeners('spy:error');
     },
@@ -130,6 +134,8 @@ contextBridge.exposeInMainWorld('prabala', {
   },
   // ── Desktop Recorder ─────────────────────────────────────────────────────────
   desktopRecorder: {
+    checkPermission: () => ipcRenderer.invoke('desktopRecorder:checkPermission'),
+    requestPermission: () => ipcRenderer.invoke('desktopRecorder:requestPermission'),
     start: (appPath: string, appiumUrl?: string) => ipcRenderer.invoke('desktopRecorder:start', appPath, appiumUrl),
     stop: () => ipcRenderer.invoke('desktopRecorder:stop'),
     onStep: (cb: (step: { keyword: string; params: Record<string, string> }) => void) => {
@@ -148,11 +154,16 @@ contextBridge.exposeInMainWorld('prabala', {
       ipcRenderer.removeAllListeners('desktopRecorder:screenshot');
       ipcRenderer.on('desktopRecorder:screenshot', (_e, frame) => cb(frame));
     },
+    onAxFallback: (cb: (message: string) => void) => {
+      ipcRenderer.removeAllListeners('desktopRecorder:axFallback');
+      ipcRenderer.on('desktopRecorder:axFallback', (_e, msg) => cb(String(msg)));
+    },
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('desktopRecorder:step');
       ipcRenderer.removeAllListeners('desktopRecorder:done');
       ipcRenderer.removeAllListeners('desktopRecorder:error');
       ipcRenderer.removeAllListeners('desktopRecorder:screenshot');
+      ipcRenderer.removeAllListeners('desktopRecorder:axFallback');
     },
   },
 });
@@ -204,12 +215,15 @@ declare global {
         removeAllListeners(): void;
       };
       desktopRecorder: {
+        checkPermission(): Promise<boolean>;
+        requestPermission(): Promise<boolean>;
         start(appPath: string, appiumUrl?: string): Promise<void>;
         stop(): Promise<void>;
         onStep(cb: (step: { keyword: string; params: Record<string, string> }) => void): void;
         onDone(cb: () => void): void;
         onError(cb: (msg: string) => void): void;
         onScreenshot(cb: (frame: { __screenshot: string; __screenshotType: string; width: number; height: number }) => void): void;
+        onAxFallback(cb: (message: string) => void): void;
         removeAllListeners(): void;
       };
     };
