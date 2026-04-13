@@ -144,12 +144,23 @@ export class HtmlReporter {
 
   private buildStepHtml(step: StepResult): string {
     const icon = step.status === 'passed' ? '✔' : step.status === 'failed' ? '✘' : '–';
-    const screenshotHtml = step.screenshot
-      ? `<details class="step-screenshot">
+
+    // Embed screenshots as base64 data URIs so the HTML is fully self-contained
+    // and renders correctly regardless of where the file is opened.
+    let screenshotHtml = '';
+    if (step.screenshot) {
+      const absPath = path.resolve(this.outputDir, step.screenshot);
+      let imgSrc = step.screenshot; // fallback to relative path
+      if (fs.existsSync(absPath)) {
+        const data = fs.readFileSync(absPath).toString('base64');
+        imgSrc = `data:image/png;base64,${data}`;
+      }
+      screenshotHtml = `<details class="step-screenshot">
            <summary>📷 Screenshot</summary>
-           <img src="${step.screenshot}" alt="step screenshot" />
-         </details>`
-      : '';
+           <img src="${imgSrc}" alt="step screenshot" />
+         </details>`;
+    }
+
     return `
         <div class="step">
           <span class="step-icon ${step.status}">${icon}</span>

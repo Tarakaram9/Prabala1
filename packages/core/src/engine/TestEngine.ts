@@ -211,9 +211,14 @@ export class TestEngine {
         context.artifacts.screenshots.push(absPath);
         return relPath;
       }
+      // DesktopSession is stored directly (not wrapped in { driver: ... })
       const desktopSession = context.driverInstances['desktop'] as any;
-      if (desktopSession?.driver) {
-        const base64: string = await desktopSession.driver.takeScreenshot();
+      if (desktopSession && typeof desktopSession.takeScreenshot === 'function') {
+        const base64: string = await desktopSession.takeScreenshot();
+        if (!base64) {
+          console.warn(chalk.yellow('    [Screenshot] takeScreenshot returned empty (screen capture permission may be missing)'));
+          return undefined;
+        }
         fs.writeFileSync(absPath, Buffer.from(base64, 'base64'));
         context.artifacts.screenshots.push(absPath);
         return relPath;
