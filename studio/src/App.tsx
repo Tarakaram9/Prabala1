@@ -16,6 +16,7 @@ import GherkinPage from './pages/GherkinPage'
 import RequirementsPage from './pages/RequirementsPage'
 import CustomKeywordsPage from './pages/CustomKeywordsPage'
 import SchedulerPage from './pages/SchedulerPage'
+import ProjectSettingsPage from './pages/ProjectSettingsPage'
 import { useAppStore } from './store/appStore'
 import { loadProjectData } from './utils/projectLoader'
 
@@ -84,6 +85,7 @@ export default function App() {
     requirements:     <PageErrorBoundary pageName="Requirements"><RequirementsPage /></PageErrorBoundary>,
     'custom-keywords': <PageErrorBoundary pageName="Custom Keywords"><CustomKeywordsPage /></PageErrorBoundary>,
     scheduler:        <PageErrorBoundary pageName="Scheduler"><SchedulerPage /></PageErrorBoundary>,
+    settings:         <PageErrorBoundary pageName="Project Settings"><ProjectSettingsPage /></PageErrorBoundary>,
   }[activePage]
 
   return <Layout>{page}</Layout>

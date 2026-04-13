@@ -4,7 +4,7 @@
 
 import { create } from 'zustand'
 
-export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline' | 'dashboard' | 'gherkin' | 'custom-keywords' | 'scheduler' | 'requirements'
+export type Page = 'builder' | 'keywords' | 'objects' | 'data' | 'monitor' | 'report' | 'ai' | 'components' | 'pipeline' | 'dashboard' | 'gherkin' | 'custom-keywords' | 'scheduler' | 'requirements' | 'settings'
 
 // ── Jira ─────────────────────────────────────────────────────────────────────
 export interface JiraConfig {

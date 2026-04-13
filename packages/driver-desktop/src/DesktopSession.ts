@@ -741,4 +741,19 @@ export class DesktopSession {
       return fs.readFileSync(tmp).toString('base64');
     } finally { try { fs.unlinkSync(tmp); } catch { /* ignore */ } }
   }
+
+  /**
+   * Return the page HTML source.
+   * For Electron/CDP apps: evaluates `document.documentElement.outerHTML` via CDP WebSocket.
+   * For native-only apps (no CDP): returns empty string (LLM healing not available).
+   */
+  async getPageSource(): Promise<string> {
+    if (this.cdpWsUrl) {
+      try {
+        const html = await cdpEval(this.cdpWsUrl, 'document.documentElement.outerHTML', 10_000);
+        return typeof html === 'string' ? html : '';
+      } catch { return ''; }
+    }
+    return '';
+  }
 }

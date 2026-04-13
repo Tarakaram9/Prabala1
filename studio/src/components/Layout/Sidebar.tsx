@@ -2,7 +2,7 @@ import { useAppStore, Page } from '../../store/appStore'
 import {
   FlaskConical, Library, Database, Table2,
   PlayCircle, BarChart3, Sparkles, Brain, LogOut, User, Puzzle, GitBranch,
-  LayoutDashboard, FileText, Wrench, CalendarClock, ClipboardList
+  LayoutDashboard, FileText, Wrench, CalendarClock, ClipboardList, Settings
 } from 'lucide-react'
 import { LucideIcon } from 'lucide-react'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { id: 'scheduler',        label: 'Scheduler',        icon: CalendarClock, badge: 'CRON' },
   { id: 'ai',               label: 'AI Co-Pilot',      icon: Brain,    badge: 'AI' },
   { id: 'pipeline',         label: 'CI/CD Pipeline',   icon: GitBranch, badge: 'CI' },
+  { id: 'settings',         label: 'Project Settings', icon: Settings, dividerAbove: true },
 ]
 
 export default function Sidebar() {

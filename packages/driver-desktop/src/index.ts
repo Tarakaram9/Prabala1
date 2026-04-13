@@ -20,7 +20,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { KeywordDefinition, ExecutionContext } from '@prabala/core';
+import { KeywordDefinition, ExecutionContext, ObjectEntry, PrabalaConfig, healLocator } from '@prabala/core';
 import { DesktopSession } from './DesktopSession';
 
 
@@ -31,6 +31,63 @@ function getSession(context: ExecutionContext): DesktopSession {
     'No desktop session active — use Desktop.LaunchApp first.'
   );
   return session;
+}
+
+// ── Desktop locator format: convert ObjectEntry strategy+value → "type=value" ─
+function desktopStrategyToLocator(strategy: string, locator: string): string {
+  switch (strategy) {
+    case 'id':          return `id=${locator}`;
+    case 'automationId':return `id=${locator}`;
+    case 'name':        return `name=${locator}`;
+    case 'role':        return `role=${locator}`;
+    case 'xpath':       return `xpath=${locator}`;
+    case 'css':         return locator;           // raw CSS — works in Electron/CDP mode
+    case 'text':        return `name=${locator}`; // closest match on desktop
+    case 'aria':        return `name=${locator}`; // aria-label → name match
+    case 'label':       return `name=${locator}`;
+    default:            return locator;            // raw passthrough
+  }
+}
+
+// ── Resolve a locator ref with self-healing — returns desktop locator string ─
+// Accepts: raw string OR ObjectEntry from the object repository.
+// When an ObjectEntry has fallbacks[] or aiRepair is configured in PrabalaConfig,
+// tries fallbacks and/or LLM repair before surfacing a failure.
+async function resolveDesktopLocator(
+  session: DesktopSession,
+  locatorRef: unknown,
+  context: ExecutionContext,
+): Promise<string> {
+  // Raw string — no healing, pass through directly
+  if (typeof locatorRef === 'string') return locatorRef;
+
+  const obj = locatorRef as ObjectEntry;
+  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
+
+  // Fast path — no fallbacks and no AI repair configured
+  if (!obj.fallbacks?.length && !obj._healedLocator && !cfg.aiRepair) {
+    return desktopStrategyToLocator(obj.strategy, obj.locator);
+  }
+
+  // Find the object key by scanning the repository
+  const objectKey =
+    Object.entries(context.objectRepository).find(([, v]) => v === obj)?.[0] ?? 'element';
+
+  const result = await healLocator({
+    objectKey,
+    entry: obj,
+    aiCfg: cfg.aiRepair,
+    strategyToExpr: desktopStrategyToLocator,
+    probe: async (expr: string) => {
+      try { return await session._isDisplayed(expr); } catch { return false; }
+    },
+    getHtml: async () => {
+      try { return await session.getPageSource(); } catch { return ''; }
+    },
+    objectRepositoryDir: cfg.objectRepositoryDir,
+  });
+
+  return result.expression;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +143,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.waitForDisplayed({ timeout: session.defaultTimeout });
       await el.click();
     },
@@ -98,7 +155,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.waitForDisplayed({ timeout: session.defaultTimeout });
       await el.doubleClick();
     },
@@ -110,7 +167,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.waitForDisplayed({ timeout: session.defaultTimeout });
       await el.click({ button: 'right' });
     },
@@ -121,7 +178,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Move the mouse over a UI element without clicking.',
     params: ['locator'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.moveTo();
     },
   },
@@ -134,7 +192,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator', 'value'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.waitForDisplayed({ timeout: session.defaultTimeout });
       await el.click();
       await el.setValue(String(params.value));
@@ -146,7 +204,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Clear all text from an input field.',
     params: ['locator'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       await el.clearValue();
     },
   },
@@ -172,7 +231,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator', 'timeout'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
       await el.waitForDisplayed({ timeout });
     },
@@ -184,7 +243,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator', 'timeout'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
       await el.waitForDisplayed({ timeout, reverse: true });
     },
@@ -196,7 +255,7 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator', 'timeout'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const el = await session.findElement(String(params.locator));
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const timeout = params.timeout ? Number(params.timeout) : session.defaultTimeout;
       await el.waitForEnabled({ timeout });
     },
@@ -209,7 +268,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Assert a UI element is visible on screen.',
     params: ['locator'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const visible = await el.isDisplayed();
       if (!visible) throw new Error(`Desktop.AssertVisible FAILED — element not visible: ${params.locator}`);
     },
@@ -221,8 +281,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     params: ['locator'],
     execute: async (params, context) => {
       const session = getSession(context);
-      const driver = session.getDriver();
-      const el = await driver.$(session.parseSelector(String(params.locator)));
+      const locator = await resolveDesktopLocator(session, params.locator, context);
+      const el = await session.$(session.parseSelector(locator));
       const exists = await el.isExisting();
       if (exists) {
         const visible = await el.isDisplayed();
@@ -236,7 +296,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Assert the text content of a UI element equals the expected value.',
     params: ['locator', 'expected'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const text = await el.getText();
       const expected = String(params.expected);
       if (text !== expected) throw new Error(
@@ -250,7 +311,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Assert a UI element\'s text contains the expected substring.',
     params: ['locator', 'expected'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const text = await el.getText();
       const expected = String(params.expected);
       if (!text.includes(expected)) throw new Error(
@@ -264,7 +326,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Assert a UI element is enabled (interactable).',
     params: ['locator'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const enabled = await el.isEnabled();
       if (!enabled) throw new Error(`Desktop.AssertEnabled FAILED — element is disabled: ${params.locator}`);
     },
@@ -275,7 +338,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Assert a UI element is disabled.',
     params: ['locator'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const enabled = await el.isEnabled();
       if (enabled) throw new Error(`Desktop.AssertDisabled FAILED — element is enabled: ${params.locator}`);
     },
@@ -288,7 +352,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Read the text of a UI element and store it in a variable.',
     params: ['locator', 'variable'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const text = await el.getText();
       context.variables[String(params.variable)] = text;
       console.log(`[Desktop] ${params.variable} = "${text}"`);
@@ -300,7 +365,8 @@ export const desktopKeywords: KeywordDefinition[] = [
     description: 'Read an attribute of a UI element and store it in a variable.',
     params: ['locator', 'attribute', 'variable'],
     execute: async (params, context) => {
-      const el = await getSession(context).findElement(String(params.locator));
+      const session = getSession(context);
+      const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
       const value = await el.getAttribute(String(params.attribute));
       context.variables[String(params.variable)] = value;
       console.log(`[Desktop] ${params.variable} = "${value}"`);
@@ -326,7 +392,8 @@ export const desktopKeywords: KeywordDefinition[] = [
       const deltaY = dir === 'up' ? -amount : amount;
 
       if (params.locator) {
-        const el = await getSession(context).findElement(String(params.locator));
+        const session = getSession(context);
+        const el = await session.findElement(await resolveDesktopLocator(session, params.locator, context));
         await (el as any).scrollIntoView();
       }
 

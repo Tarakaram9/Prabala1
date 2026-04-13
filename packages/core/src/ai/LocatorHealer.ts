@@ -220,6 +220,12 @@ export interface HealContext {
   getHtml: () => Promise<string>;
   /** Object repository dir path — for write-back */
   objectRepositoryDir?: string;
+  /**
+   * Optional custom converter from ObjectEntry strategy+locator to an expression string.
+   * Defaults to `strategyToExpression` (Playwright/web format).
+   * Override for non-web drivers (e.g. desktop) that use a different locator syntax.
+   */
+  strategyToExpr?: (strategy: LocatorStrategy, locator: string) => string;
 }
 
 export interface HealResult {
@@ -241,17 +247,18 @@ export interface HealResult {
  */
 export async function healLocator(ctx: HealContext): Promise<HealResult> {
   const { entry, objectKey, aiCfg, probe, getHtml, objectRepositoryDir } = ctx;
+  const toExpr = ctx.strategyToExpr ?? strategyToExpression;
 
   // 0. Prefer a previously healed locator
   if (entry._healedStrategy && entry._healedLocator) {
-    const expr = strategyToExpression(entry._healedStrategy, entry._healedLocator);
+    const expr = toExpr(entry._healedStrategy, entry._healedLocator);
     if (await probe(expr)) {
       return { expression: expr, healedBy: 'fallback' };
     }
   }
 
   // 1. Try primary locator
-  const primaryExpr = strategyToExpression(entry.strategy, entry.locator);
+  const primaryExpr = toExpr(entry.strategy, entry.locator);
   if (await probe(primaryExpr)) {
     return { expression: primaryExpr, healedBy: 'primary' };
   }
@@ -262,7 +269,7 @@ export async function healLocator(ctx: HealContext): Promise<HealResult> {
 
   // 2. Try fallbacks
   for (const fb of entry.fallbacks ?? []) {
-    const expr = strategyToExpression(fb.strategy as LocatorStrategy, fb.locator);
+    const expr = toExpr(fb.strategy as LocatorStrategy, fb.locator);
     const ok = await probe(expr);
     if (ok) {
       console.log(chalk.cyan(
