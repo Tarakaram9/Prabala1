@@ -392,7 +392,8 @@ const api = {
     removeListeners(): void { wsOffAll(['ai:chunk', 'ai:done']) },
   },
 
-  // Internal helper — wsOff exposed for custom usage
+  // Internal helpers — wsOn/wsOff exposed for custom usage
+  _wsOn: wsOn,
   _wsOff: wsOff,
 
   results: {

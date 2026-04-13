@@ -40,6 +40,7 @@ httpServer.on('upgrade', (request, socket, head) => {
 
 // ── Active processes ──────────────────────────────────────────────────────────
 let runnerProcess: ChildProcess | null = null
+let lastKnownProjectDir: string = process.cwd()
 let recorderProcess: ChildProcess | null = null
 let spyProcess: ChildProcess | null = null
 
@@ -273,6 +274,7 @@ app.post('/api/runner/run', (req: Request, res: Response) => {
     const { pattern, projectDir, extraArgs = [] } = req.body as {
       pattern: string; projectDir: string; extraArgs?: string[]
     }
+    if (projectDir) lastKnownProjectDir = projectDir
     if (runnerProcess) {
       runnerProcess.kill()
       runnerProcess = null
@@ -1309,6 +1311,103 @@ app.delete('/api/schedules/:id', (req: Request, res: Response) => {
   }
 })
 
+// ── Cron scheduler engine ─────────────────────────────────────────────────────
+// Polls every minute, matches cron expressions, and fires test runs.
+
+function parseCronField(field: string, min: number, max: number): number[] {
+  const values: number[] = []
+  if (field === '*') {
+    for (let i = min; i <= max; i++) values.push(i)
+    return values
+  }
+  for (const part of field.split(',')) {
+    if (part.includes('/')) {
+      const [range, step] = part.split('/')
+      const s = parseInt(step, 10)
+      const start = range === '*' ? min : parseInt(range.split('-')[0], 10)
+      const end   = range.includes('-') ? parseInt(range.split('-')[1], 10) : max
+      for (let i = start; i <= end; i += s) values.push(i)
+    } else if (part.includes('-')) {
+      const [a, b] = part.split('-').map(Number)
+      for (let i = a; i <= b; i++) values.push(i)
+    } else {
+      values.push(parseInt(part, 10))
+    }
+  }
+  return values
+}
+
+function matchesCron(expr: string, d: Date): boolean {
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length !== 5) return false
+  const [m, h, dom, mon, dow] = parts
+  const matches = (field: string, val: number, lo: number, hi: number) =>
+    parseCronField(field, lo, hi).includes(val)
+  return (
+    matches(m,   d.getMinutes(),    0, 59) &&
+    matches(h,   d.getHours(),      0, 23) &&
+    matches(dom, d.getDate(),       1, 31) &&
+    matches(mon, d.getMonth() + 1,  1, 12) &&
+    matches(dow, d.getDay(),        0,  6)
+  )
+}
+
+function startCronScheduler(): void {
+  // Align to the next full minute boundary then tick every 60 s
+  const msToNextMinute = (60 - new Date().getSeconds()) * 1000 - new Date().getMilliseconds()
+  setTimeout(() => {
+    tick()
+    setInterval(tick, 60_000)
+  }, msToNextMinute)
+
+  console.log('  ⏱  Cron scheduler active (next tick in ~' + Math.round(msToNextMinute / 1000) + 's)')
+}
+
+async function tick(): Promise<void> {
+  const now = new Date()
+  const schedules = readSchedules()
+  let dirty = false
+
+  for (const run of schedules) {
+    if (!run.enabled || !run.cron || !run.pattern) continue
+    if (!matchesCron(run.cron, now)) continue
+
+    const projectDir: string = run.projectDir || lastKnownProjectDir
+    console.log(`[Cron] Firing schedule "${run.name || run.id}" (${run.cron}) — pattern: ${run.pattern}`)
+    const started = now.toISOString()
+    dirty = true
+
+    const cliPath = path.resolve(__dirname, '../../cli/dist/index.js')
+    const extraArgs: string[] = []
+    if (run.profile) extraArgs.push('--profile', run.profile)
+
+    const child = spawn('node', [cliPath, 'run', run.pattern, ...extraArgs], {
+      cwd: projectDir,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    broadcast('runner:stdout', `\n[Scheduler] Running "${run.name || run.id}" at ${started}\n`)
+
+    child.stdout?.on('data', (d: Buffer) => broadcast('runner:stdout', d.toString()))
+    child.stderr?.on('data', (d: Buffer) => broadcast('runner:stderr', d.toString()))
+
+    child.on('close', (code: number | null) => {
+      const status = code === 0 ? 'passed' : 'failed'
+      const idx = schedules.findIndex((s) => s.id === run.id)
+      if (idx >= 0) {
+        schedules[idx].lastRun    = started
+        schedules[idx].lastStatus = status
+        writeSchedules(schedules)
+      }
+      broadcast('runner:stdout', `[Scheduler] "${run.name || run.id}" finished — ${status}\n`)
+      broadcast('schedule:updated', { id: run.id, lastRun: started, lastStatus: status })
+    })
+  }
+
+  if (dirty) writeSchedules(schedules)
+}
+
 // ── /api/ai/impact ────────────────────────────────────────────────────────────
 // Lightweight test-impact analysis: given changed file paths, returns subset of
 // test files that likely reference those files (keyword match on file names).
@@ -1471,4 +1570,5 @@ app.post('/api/jira/issues', async (req: Request, res: Response) => {
 httpServer.listen(PORT, () => {
   console.log(`\n  🔮 Prabala Studio Server`)
   console.log(`  ➜  http://localhost:${PORT}\n`)
+  startCronScheduler()
 })

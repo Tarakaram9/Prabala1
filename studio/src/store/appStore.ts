@@ -141,6 +141,8 @@ export interface ScheduledRun {
   cron: string
   enabled: boolean
   profile?: string
+  /** Absolute path to the project directory — required for background execution */
+  projectDir?: string
   lastRun?: string
   lastStatus?: 'passed' | 'failed'
 }
@@ -398,7 +400,7 @@ export const useAppStore = create<AppState>((set) => ({
   upsertScheduledRun: (run) =>
     set((s) => ({
       scheduledRuns: s.scheduledRuns.some((r) => r.id === run.id)
-        ? s.scheduledRuns.map((r) => (r.id === run.id ? run : r))
+        ? s.scheduledRuns.map((r) => (r.id === run.id ? { ...r, ...run } : r))
         : [...s.scheduledRuns, run],
     })),
   deleteScheduledRun: (id) =>

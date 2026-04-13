@@ -50,6 +50,17 @@ export default function SchedulerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Live-update lastRun/lastStatus when a scheduled job completes
+  useEffect(() => {
+    function onScheduleUpdated(payload: unknown) {
+      const p = payload as { id: string; lastRun: string; lastStatus: string }
+      if (p?.id) upsertScheduledRun({ id: p.id, lastRun: p.lastRun, lastStatus: p.lastStatus } as ScheduledRun)
+    }
+    api._wsOn?.('schedule:updated', onScheduleUpdated)
+    return () => api._wsOff?.('schedule:updated', onScheduleUpdated)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function openNew() {
     setEditing({ id: uid(), name: 'New Schedule', pattern: 'tests/**/*.yaml', cron: '0 9 * * *', enabled: true, profile: activeProfile })
   }
@@ -60,13 +71,14 @@ export default function SchedulerPage() {
 
   async function saveEdit() {
     if (!editing) return
-    upsertScheduledRun(editing)
-    try { await api.schedules.upsert(editing) } catch { /* ignore */ }
+    const toSave = { ...editing, projectDir: editing.projectDir || projectDir }
+    upsertScheduledRun(toSave)
+    try { await api.schedules.upsert(toSave) } catch { /* ignore */ }
     setEditing(null)
   }
 
   async function toggleEnabled(run: ScheduledRun) {
-    const updated = { ...run, enabled: !run.enabled }
+    const updated = { ...run, enabled: !run.enabled, projectDir: run.projectDir || projectDir }
     upsertScheduledRun(updated)
     try { await api.schedules.upsert(updated) } catch { /* ignore */ }
   }
@@ -130,6 +142,9 @@ export default function SchedulerPage() {
                     <span className="text-sm font-semibold text-white truncate">{run.name}</span>
                     {run.profile && (
                       <span className="text-[10px] bg-brand-900/40 text-brand-300 px-1.5 py-0.5 rounded font-mono">{run.profile}</span>
+                    )}
+                    {!run.projectDir && (
+                      <span className="text-[10px] bg-yellow-900/30 text-yellow-400 border border-yellow-700/40 px-1.5 py-0.5 rounded" title="No project directory set — will use last opened project">⚠ No project dir</span>
                     )}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5">
