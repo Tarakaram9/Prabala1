@@ -40,7 +40,17 @@ httpServer.on('upgrade', (request, socket, head) => {
 
 // ── Active processes ──────────────────────────────────────────────────────────
 let runnerProcess: ChildProcess | null = null
-let lastKnownProjectDir: string = process.cwd()
+// Seed lastKnownProjectDir from first schedule that has a projectDir
+let lastKnownProjectDir: string = (() => {
+  const schedules = (() => {
+    try {
+      const f = path.join(os.homedir(), '.prabala', 'schedules.json')
+      if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, 'utf-8')) as any[]
+    } catch { /* ignore */ }
+    return []
+  })()
+  return schedules.find((s: any) => s.projectDir)?.projectDir ?? process.cwd()
+})()
 let recorderProcess: ChildProcess | null = null
 let spyProcess: ChildProcess | null = null
 
@@ -1567,6 +1577,17 @@ app.post('/api/jira/issues', async (req: Request, res: Response) => {
 })
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  ❌  Port ${PORT} is already in use.`)
+    console.error(`  ➜  Another instance of Prabala Studio Server is already running.`)
+    console.error(`  ➜  Run: lsof -ti :${PORT} | xargs kill -9\n`)
+    process.exit(1)
+  } else {
+    throw err
+  }
+})
+
 httpServer.listen(PORT, () => {
   console.log(`\n  🔮 Prabala Studio Server`)
   console.log(`  ➜  http://localhost:${PORT}\n`)
