@@ -2,22 +2,23 @@
   "name": "prabala-studio",
   "version": "0.1.0",
   "description": "Prabala Test Studio – Visual Electron IDE for Prabala automation framework",
+  "author": "Prabala",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "tsc -p tsconfig.electron.json && concurrently -k \"npx ts-node ../packages/studio-server/src/index.ts\" \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:web": "concurrently -k \"npx ts-node ../packages/studio-server/src/index.ts\" \"VITE_TARGET=web vite\"",
     "build": "vite build && tsc -p tsconfig.electron.json",
     "build:web": "VITE_TARGET=web vite build",
+    "build:server": "../node_modules/.bin/esbuild ../packages/studio-server/src/index.ts --bundle --platform=node --target=node18 --outfile=resources/server.bundle.js --log-level=warning",
     "preview": "electron .",
-    "pack": "npm run build && electron-builder",
-    "dist": "npm run build && electron-builder --publish=always"
+    "pack": "npm run build && npm run build:server && electron-builder",
+    "dist": "npm run build && npm run build:server && electron-builder --publish=always"
   },
   "dependencies": {
     "@prabala/core": "*",
     "@prabala/driver-web": "*",
     "@xyflow/react": "^12.0.0",
     "axios": "^1.6.8",
-    "electron": "^30.0.0",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.378.0",
     "openai": "^6.32.0",
@@ -34,6 +35,7 @@
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
+    "electron": "30.5.1",
     "electron-builder": "^24.13.0",
     "postcss": "^8.4.38",
     "rimraf": "^5.0.0",
@@ -50,6 +52,25 @@
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist-electron/**",
+      "!dist-renderer/**"
+    ],
+    "extraResources": [
+      { "from": "dist-renderer", "to": "dist-renderer" },
+      { "from": "resources/server.bundle.js", "to": "server.bundle.js" },
+      { "from": "electron/recorder.cjs", "to": "electron/recorder.cjs" },
+      { "from": "electron/spy.cjs", "to": "electron/spy.cjs" },
+      { "from": "electron/sap-spy.cjs", "to": "electron/sap-spy.cjs" },
+      { "from": "electron/desktop-spy.cjs", "to": "electron/desktop-spy.cjs" },
+      { "from": "electron/desktop-spy-native.cjs", "to": "electron/desktop-spy-native.cjs" },
+      { "from": "electron/desktop-recorder.cjs", "to": "electron/desktop-recorder.cjs" },
+      { "from": "electron/recorder-window-preload.cjs", "to": "electron/recorder-window-preload.cjs" },
+      { "from": "electron/spy-window-preload.cjs", "to": "electron/spy-window-preload.cjs" },
+      { "from": "../packages/cli/dist/index.js", "to": "cli/index.js" },
+      { "from": "../node_modules/playwright", "to": "node_modules/playwright", "filter": ["**", "!**/test/**", "!**/*.md"] },
+      { "from": "../node_modules/playwright-core", "to": "node_modules/playwright-core", "filter": ["**", "!**/test/**", "!**/*.md"] }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "src/assets/icons/mac/icon.icns",

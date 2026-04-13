@@ -64,6 +64,7 @@ function killChild(child: ReturnType<typeof spawn> | null): void {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let studioServerProcess: ReturnType<typeof spawn> | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -86,7 +87,9 @@ function createWindow(): void {
     mainWindow.loadURL(RENDERER_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
+    // dist-renderer is placed in extraResources (outside the asar) so it is
+    // accessible to both loadFile here and to the studio-server static serving.
+    mainWindow.loadFile(path.join(process.resourcesPath, 'dist-renderer', 'index.html'));
   }
 
   // Clear stored auth on every launch so the Login page is always shown.
@@ -126,6 +129,24 @@ app.whenReady().then(() => {
     });
   });
 
+  // ── Embedded studio-server (packaged builds only) ──────────────────────────
+  // In dev, concurrently starts the server separately. When double-clicking the
+  // packaged .app/.exe we spawn the self-contained server.bundle.js ourselves.
+  if (app.isPackaged) {
+    const serverBundle = path.join(process.resourcesPath, 'server.bundle.js');
+    studioServerProcess = spawn(NODE_BIN, [serverBundle], {
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        PRABALA_RESOURCES_PATH: process.resourcesPath,
+      },
+      stdio: 'ignore',
+    });
+    studioServerProcess.on('error', (err: Error) => {
+      console.error('[Studio Server] Failed to start:', err.message);
+    });
+  }
+
   createWindow();
   registerIpcHandlers();
 
@@ -141,6 +162,11 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+app.on('will-quit', () => {
+  killChild(studioServerProcess);
+  studioServerProcess = null;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

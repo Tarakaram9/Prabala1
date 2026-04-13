@@ -18,7 +18,25 @@ const httpServer = createServer(app)
 const wss = new WebSocketServer({ noServer: true })
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10)
-const STUDIO_DIST = path.resolve(__dirname, '../../../studio/dist')
+
+// When running inside a packaged Electron app, PRABALA_RESOURCES_PATH is set
+// by the Electron main process to process.resourcesPath (the Resources/ folder
+// of the .app bundle / installed app). This lets us locate bundled assets.
+const RESOURCES = process.env.PRABALA_RESOURCES_PATH || ''
+
+/**
+ * Resolve a file path.
+ * - In dev (ts-node): uses `devRelative` relative to __dirname.
+ * - In packaged Electron (PRABALA_RESOURCES_PATH set): uses `packagedRelative`
+ *   relative to the Resources folder.
+ */
+function resolveResource(devRelative: string, packagedRelative: string): string {
+  return RESOURCES
+    ? path.join(RESOURCES, packagedRelative)
+    : path.resolve(__dirname, devRelative)
+}
+
+const STUDIO_DIST = resolveResource('../../../studio/dist-renderer', 'dist-renderer')
 
 // Trust the first reverse proxy so req.protocol reflects https:// when running
 // behind Azure Container Apps / Nginx TLS termination.
@@ -289,7 +307,7 @@ app.post('/api/runner/run', (req: Request, res: Response) => {
       runnerProcess.kill()
       runnerProcess = null
     }
-    const cliPath = path.resolve(__dirname, '../../cli/dist/index.js')
+    const cliPath = resolveResource('../../cli/dist/index.js', 'cli/index.js')
     runnerProcess = spawn('node', [cliPath, 'run', pattern, ...extraArgs], {
       cwd: projectDir,
       env: { ...process.env },
@@ -796,10 +814,9 @@ app.post('/api/recorder/start', (req: Request, res: Response) => {
 
     if (recorderProcess) { killChild(recorderProcess); recorderProcess = null }
 
-    // Resolve recorder.cjs relative to this file:
-    // dist/index.js → ../../../studio/electron/recorder.cjs
-    const recorderScript = path.resolve(__dirname, '../../../studio/electron/recorder.cjs')
-    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+    // Resolve recorder.cjs — dev: relative to __dirname, packaged: from Resources/
+    const recorderScript = resolveResource('../../../studio/electron/recorder.cjs', 'electron/recorder.cjs')
+    const monoRepoNodeModules = resolveResource('../../../node_modules', 'node_modules')
 
     recorderProcess = spawn('node', [recorderScript, startUrl || ''], {
       cwd: projectDir || process.cwd(),
@@ -865,8 +882,8 @@ app.post('/api/spy/start', (req: Request, res: Response) => {
     const { url, mode = 'web' } = req.body as { url: string; mode?: 'web' | 'sap' | 'desktop' | 'mobile' }
     if (spyProcess) { killChild(spyProcess); spyProcess = null }
 
-    const electronDir = path.resolve(__dirname, '../../../studio/electron')
-    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+    const electronDir = resolveResource('../../../studio/electron', 'electron')
+    const monoRepoNodeModules = resolveResource('../../../node_modules', 'node_modules')
 
     let spyScript: string
     let spyArgs: string[]
@@ -936,8 +953,8 @@ app.post('/api/desktopRecorder/start', (req: Request, res: Response) => {
     const { appPath, appiumUrl } = req.body as { appPath?: string; appiumUrl?: string }
     if (desktopRecorderProcess) { killChild(desktopRecorderProcess); desktopRecorderProcess = null }
 
-    const recorderScript = path.resolve(__dirname, '../../../studio/electron/desktop-recorder.cjs')
-    const monoRepoNodeModules = path.resolve(__dirname, '../../../node_modules')
+    const recorderScript = resolveResource('../../../studio/electron/desktop-recorder.cjs', 'electron/desktop-recorder.cjs')
+    const monoRepoNodeModules = resolveResource('../../../node_modules', 'node_modules')
 
     desktopRecorderProcess = spawn('node', [recorderScript, appPath || '', appiumUrl || 'http://localhost:4723'], {
       cwd: path.dirname(recorderScript),
@@ -1223,7 +1240,7 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
 
 app.get('/api/app/version', (_req: Request, res: Response) => {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf-8')) as { version?: string }
+    const pkg = JSON.parse(fs.readFileSync(resolveResource('../../package.json', 'package.json'), 'utf-8')) as { version?: string }
     res.json({ version: pkg.version ?? '1.0.0' })
   } catch {
     res.json({ version: '1.0.0' })
@@ -1387,7 +1404,7 @@ async function tick(): Promise<void> {
     const started = now.toISOString()
     dirty = true
 
-    const cliPath = path.resolve(__dirname, '../../cli/dist/index.js')
+    const cliPath = resolveResource('../../cli/dist/index.js', 'cli/index.js')
     const extraArgs: string[] = []
     if (run.profile) extraArgs.push('--profile', run.profile)
 

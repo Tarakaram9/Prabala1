@@ -4,6 +4,8 @@ dist/
 **/dist/
 dist-electron/
 **/dist-electron/
+studio/resources/
+studio/release/
 **/.vite/
 *.log
 .env
