@@ -23,15 +23,15 @@ import { HtmlReporter, JUnitReporter } from '@prabala/reporting';
 registerWebKeywords();
 registerApiKeywords();
 
-// SAP GUI keywords — only register on Windows, skip gracefully elsewhere
-if (process.platform === 'win32') {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { registerSapKeywords } = require('@prabala/driver-sap');
-    registerSapKeywords();
-  } catch {
-    // driver-sap not built yet or winax missing — no-op
-  }
+// SAP GUI keywords — registered on all platforms; actual execution requires
+// Windows + SAP GUI installed. On non-Windows the keywords exist in the
+// registry so they are recognised, but SAP.Connect will throw a clear error.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { registerSapKeywords } = require('@prabala/driver-sap');
+  registerSapKeywords();
+} catch {
+  // driver-sap not built yet — no-op
 }
 
 // Desktop keywords — register with graceful fallback if native deps unavailable
