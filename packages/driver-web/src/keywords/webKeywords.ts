@@ -31,13 +31,27 @@ async function resolveLocator(
   locatorRef: unknown,
   context: ExecutionContext,
 ): Promise<Locator> {
-  // Raw string — no healing, pure Playwright
+  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
+
+  // Raw string locator: bypass healing unless aiRepair is configured.
+  // When aiRepair IS set, wrap in a synthetic ObjectEntry so that if the
+  // primary selector matches zero elements the LLM can suggest a fix.
   if (typeof locatorRef === 'string') {
-    return page.locator(locatorRef);
+    if (!cfg.aiRepair) return page.locator(locatorRef);
+    const result = await healLocator({
+      objectKey: locatorRef,
+      entry: { strategy: 'css', locator: locatorRef, description: locatorRef },
+      aiCfg: cfg.aiRepair,
+      probe: async (expr: string) => {
+        try { return (await page.locator(expr).count()) > 0; } catch { return false; }
+      },
+      getHtml: () => page.content(),
+      objectRepositoryDir: cfg.objectRepositoryDir,
+    });
+    return page.locator(result.expression);
   }
 
   const obj = locatorRef as ObjectEntry;
-  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
 
   // Fast path — no fallbacks and no AI repair configured
   if (!obj.fallbacks?.length && !obj._healedLocator && !cfg.aiRepair) {

@@ -3,6 +3,8 @@
   "version": "0.1",
   "browser": "chromium",
   "outputDir": "/Users/ram/prabala/test1/artifacts",
+  "objectRepositoryDir": "object-repository",
+  "testDataDir": "test-data",
   "timeout": 60000,
   "headless": true,
   "aiRepair": {

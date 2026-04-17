@@ -58,11 +58,30 @@ async function resolveDesktopLocator(
   locatorRef: unknown,
   context: ExecutionContext,
 ): Promise<string> {
-  // Raw string — no healing, pass through directly
-  if (typeof locatorRef === 'string') return locatorRef;
+  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
+
+  // Raw string locator: bypass healing unless aiRepair is configured.
+  // When aiRepair IS set, wrap in a synthetic ObjectEntry so that if the
+  // primary selector matches zero elements the LLM can suggest a fix.
+  if (typeof locatorRef === 'string') {
+    if (!cfg.aiRepair) return locatorRef;
+    const result = await healLocator({
+      objectKey: locatorRef,
+      entry: { strategy: 'css', locator: locatorRef, description: locatorRef },
+      aiCfg: cfg.aiRepair,
+      strategyToExpr: desktopStrategyToLocator,
+      probe: async (expr: string) => {
+        try { return await session._isDisplayed(expr); } catch { return false; }
+      },
+      getHtml: async () => {
+        try { return await session.getPageSource(); } catch { return ''; }
+      },
+      objectRepositoryDir: cfg.objectRepositoryDir,
+    });
+    return result.expression;
+  }
 
   const obj = locatorRef as ObjectEntry;
-  const cfg = (context.variables['__config__'] ?? {}) as PrabalaConfig;
 
   // Fast path — no fallbacks and no AI repair configured
   if (!obj.fallbacks?.length && !obj._healedLocator && !cfg.aiRepair) {
