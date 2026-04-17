@@ -206,6 +206,14 @@ export class TestEngine {
     try {
       const webSession = context.driverInstances['web'] as any;
       if (webSession?.page && !webSession.page.isClosed()) {
+        // Wait for any in-flight navigation to settle before screenshotting.
+        // Errors here (e.g. mid-redirect) are non-fatal — skip silently.
+        try {
+          await webSession.page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+        } catch {
+          // page still navigating — skip screenshot for this step
+          return undefined;
+        }
         const buf: Buffer = await webSession.page.screenshot({ fullPage: false, timeout: 10000 }) as Buffer;
         fs.writeFileSync(absPath, buf);
         context.artifacts.screenshots.push(absPath);

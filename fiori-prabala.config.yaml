@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prabala Configuration – SAP Fiori / WebGUI Testing
+#
+# Replace FIORI_BASE_URL with your actual system, e.g.:
+#   S/4HANA on-premise : https://my-s4.corp.com:8443/sap/bc/ui5_ui5/ui2/ushell/shells/abap/FioriLaunchpad.html
+#   S/4HANA Cloud      : https://myXXXXXX.s4hana.ondemand.com/ui
+#   BTP / Launchpad    : https://SUBDOMAIN.launchpad.cfapps.REGION.hana.ondemand.com
+# ─────────────────────────────────────────────────────────────────────────────
+
+baseUrl: "https://my429998.s4hana.cloud.sap/ui"
+browser: chromium
+headless: false          # Keep visible so you can watch / debug Fiori interactions
+screenshotOnStep: always # Capture a screenshot after every step
+timeout: 60000           # SAP Fiori apps often take longer to load than regular web apps
+objectRepositoryDir: object-repository
+testDataDir: test-data
+outputDir: artifacts
+keywordsDir: keywords
+
+env:
+  ENVIRONMENT: "fiori"
+  SAP_CLIENT: "100"      # Override per environment if needed
