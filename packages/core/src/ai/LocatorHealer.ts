@@ -59,18 +59,26 @@ async function callOpenAI(
   apiKey: string,
   baseUrl: string,
 ): Promise<string> {
-  const url = `${baseUrl}/chat/completions`;
+  // Azure OpenAI: endpoint contains .openai.azure.com
+  // URL format: {baseUrl}/chat/completions?api-version=2024-02-01
+  // Auth header: api-key instead of Authorization: Bearer
+  const isAzure = baseUrl.includes('.openai.azure.com');
+  const url = isAzure
+    ? `${baseUrl}/chat/completions?api-version=2024-02-01`
+    : `${baseUrl}/chat/completions`;
   const body = JSON.stringify({
     model,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
     max_tokens: 200,
   });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body,
-  });
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (isAzure) {
+    headers['api-key'] = apiKey;
+  } else {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  const res = await fetch(url, { method: 'POST', headers, body });
   if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { choices: Array<{ message: { content: string } }> };
   return json.choices?.[0]?.message?.content ?? '';

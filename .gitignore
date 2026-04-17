@@ -17,3 +17,5 @@ allure-report/
 artifacts/
 *.db
 *.tsbuildinfo
+# Local project configs may contain API keys — never commit
+test*/prabala.config.json
